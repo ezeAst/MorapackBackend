@@ -1,0 +1,31 @@
+codigo,nombre,pais,capacidad,capacidadAct,husoHorario,continente
+SKBO,Bogota,Colombia,430,0,-5,America
+SEQM,Quito,Ecuador,410,0,-5,America
+SVMI,Caracas,Venezuela,400,0,-4,America
+SBBR,Brasilia,Brasil,480,0,-3,America
+SPIM,Lima,Perú,440,0,-5,America
+SLLP,La Paz,Bolivia,420,0,-4,America
+SCEL,Santiago de Chile,Chile,460,0,-3,America
+SABE,Buenos Aires,Argentina,460,0,-3,America
+SGAS,Asunción,Paraguay,400,0,-4,America
+SUAA,Motenvideo,Uruguay,400,0,-3,America
+LATI,Tirana,Albania,410,0,2,Europa
+EDDI,Berlin,Alemania,480,0,2,Europa
+LOWW,Viena,Austria,430,0,2,Europa
+EBCI,Bruselas,Belgica,440,0,2,Europa
+UMMS,Minsk,Bielorrusia,400,0,3,Europa
+LBSF,Sofia,Bulgaria,400,0,3,Europa
+LKPR,Praga,Checa,400,0,2,Europa
+LDZA,Zagreb,Croacia,420,0,2,Europa
+EKCH,Copenhague,Dinamarca,480,0,2,Europa
+EHAM,Amsterdam,Holanda,480,0,2,Europa
+VIDP,Delhi,India,480,0,5,Asia
+OSDI,Damasco,Siria,400,0,3,Asia
+OERK,Riad,Arabia Saudita,420,0,3,Asia
+OMDB,Dubai,Emiratos A.U,420,0,4,Asia
+OAKB,Kabul,Afganistan,480,0,4,Asia
+OOMS,Mascate,Oman,460,0,4,Asia
+OYSN,Sana,Yemen,420,0,3,Asia
+OPKC,Karachi,Pakistan,410,0,5,Asia
+UBBB,Baku,Azerbaiyan,400,0,2,Asia
+OJAI,Aman,Jordania,400,0,3,Asia
