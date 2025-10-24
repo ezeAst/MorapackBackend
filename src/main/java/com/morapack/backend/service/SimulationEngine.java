@@ -81,8 +81,25 @@ public class SimulationEngine {
         snapshot.setDepartureTime(vuelo.getHoraSalida());
         snapshot.setArrivalTime(vuelo.getHoraLlegada());
 
-        Duration duration = Duration.between(vuelo.getHoraSalida(), vuelo.getHoraLlegada());
-        snapshot.setDurationSeconds(duration.getSeconds());
+        // ===== NUEVA LÓGICA: Calcular duración REAL considerando zonas horarias =====
+        int husoOrigen = vuelo.getAeropuertoOrigen().getHusoHorario();
+        int husoDestino = vuelo.getAeropuertoDestino().getHusoHorario();
+
+        // Convertir ambas horas a UTC para calcular duración real
+        LocalDateTime salidaUTC = convertirAUTC(vuelo.getHoraSalida(), husoOrigen);
+        LocalDateTime llegadaUTC = convertirAUTC(vuelo.getHoraLlegada(), husoDestino);
+
+        Duration duration = Duration.between(salidaUTC, llegadaUTC);
+        long duracionReal = duration.getSeconds();
+
+        // Si la duración es negativa, el vuelo llega al día siguiente
+        if (duracionReal < 0) {
+            duracionReal += 24 * 3600; // Sumar 24 horas
+        }
+
+        snapshot.setDurationSeconds(duracionReal); // ✅ Duración REAL
+        // ============================================================================
+
         snapshot.setElapsedSeconds(0);
 
         snapshot.setPackages(vuelo.getCapacidadActual());
@@ -94,6 +111,14 @@ public class SimulationEngine {
         snapshot.setCurrentLng(coordOrigen[0]);
 
         return snapshot;
+    }
+
+    /**
+     * Convierte una hora local a UTC restando el huso horario
+     * Ejemplo: 10:00 en Lima (UTC-5) = 15:00 UTC
+     */
+    private LocalDateTime convertirAUTC(LocalDateTime fechaLocal, int husoHorario) {
+        return fechaLocal.minusHours(husoHorario);
     }
 
     /**
