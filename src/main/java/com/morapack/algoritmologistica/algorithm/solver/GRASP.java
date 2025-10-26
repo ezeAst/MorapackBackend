@@ -164,6 +164,7 @@ public class GRASP {
                         sb.append(vuelo.getAeropuertoOrigen().getPais())
                           .append(" -> ");
                     }
+                    sb.append(" Con Hora").append(ruta.getVuelos().getLast().getHoraLlegada());
                     // Aeropuerto final
                     if (!ruta.getVuelos().isEmpty()) {
                         sb.append(ruta.getVuelos().get(ruta.getVuelos().size()-1).getAeropuertoDestino().getPais());
@@ -281,8 +282,14 @@ public class GRASP {
         // Set de aeropuertos visitados (para evitar ciclos)
         Set<String> visitados = new HashSet<>();
 
+        LocalDateTime fechaInicioEnZonaOrigen = convertirEntreZonas(
+                fechaInicio,
+                destino.getHusoHorario(),  // Zona horaria del pedido (destino)
+                origen.getHusoHorario()     // Zona horaria de la sede de origen
+        );
+
         // Nodo inicial
-        NodoRuta nodoInicial = new NodoRuta(origen, fechaInicio, 0, new ArrayList<>());
+        NodoRuta nodoInicial = new NodoRuta(origen, fechaInicioEnZonaOrigen, 0, new ArrayList<>());
         cola.add(nodoInicial);
 
         long plazoMaximoHoras = plazoMaximoDias * 24;
@@ -306,10 +313,20 @@ public class GRASP {
                 continue;
             }
 
+            LocalDateTime tiempoMinimo;
+
+            if (actual.tiempoAcumuladoHoras == 0) {
+                // Nodo inicial (sede principal) - sin tiempo de espera adicional
+                tiempoMinimo = actual.tiempoLlegada;
+            } else {
+                // Escala/conexión - mínimo 1 hora de espera
+                tiempoMinimo = actual.tiempoLlegada.plusHours(1);
+            }
+
             // Explorar vuelos disponibles desde este aeropuerto
             List<Vuelo> vuelosDesdeAqui = obtenerVuelosDisponibles(
                     actual.aeropuerto,
-                    actual.tiempoLlegada.plusHours(1) // Mínimo 1 hora de espera
+                    tiempoMinimo // Mínimo 1 hora de espera
             );
 
             for (Vuelo vuelo : vuelosDesdeAqui) {
@@ -612,6 +629,13 @@ public class GRASP {
                         aeropuertoLlegada.getCodigo() + " (no debería pasar si validamos bien)");
             }
         }
+    }
+    //Sebastian_v2
+    private LocalDateTime convertirEntreZonas(LocalDateTime tiempo, int husoDesde, int husoHasta) {
+        // Convertir a UTC
+        LocalDateTime tiempoUTC = convertirAUTC(tiempo, husoDesde);
+        // Convertir a zona destino
+        return tiempoUTC.plusHours(husoHasta);
     }
 
 }
