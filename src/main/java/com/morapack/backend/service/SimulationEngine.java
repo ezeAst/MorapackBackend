@@ -78,27 +78,37 @@ public class SimulationEngine {
         snapshot.setOrigin(vuelo.getAeropuertoOrigen().getNombre());
         snapshot.setDestination(vuelo.getAeropuertoDestino().getNombre());
 
-        snapshot.setDepartureTime(vuelo.getHoraSalida());
-        snapshot.setArrivalTime(vuelo.getHoraLlegada());
+        // ===== CONVERTIR HORAS LOCALES A HORA DE LIMA (UTC-5) =====
+        final int HUSO_LIMA = -5;  // Lima UTC-5
 
-        // ===== NUEVA LÓGICA: Calcular duración REAL considerando zonas horarias =====
         int husoOrigen = vuelo.getAeropuertoOrigen().getHusoHorario();
         int husoDestino = vuelo.getAeropuertoDestino().getHusoHorario();
 
-        // Convertir ambas horas a UTC para calcular duración real
-        LocalDateTime salidaUTC = convertirAUTC(vuelo.getHoraSalida(), husoOrigen);
-        LocalDateTime llegadaUTC = convertirAUTC(vuelo.getHoraLlegada(), husoDestino);
+        // Las horas del vuelo están en hora LOCAL de cada aeropuerto
+        LocalDateTime horaSalidaLocal = vuelo.getHoraSalida();
+        LocalDateTime horaLlegadaLocal = vuelo.getHoraLlegada();
 
-        Duration duration = Duration.between(salidaUTC, llegadaUTC);
-        long duracionReal = duration.getSeconds();
+        // Paso 1: Convertir a UTC
+        LocalDateTime horaSalidaUTC = convertirAUTC(horaSalidaLocal, husoOrigen);
+        LocalDateTime horaLlegadaUTC = convertirAUTC(horaLlegadaLocal, husoDestino);
 
-        // Si la duración es negativa, el vuelo llega al día siguiente
-        if (duracionReal < 0) {
-            duracionReal += 24 * 3600; // Sumar 24 horas
+        // Paso 2: Convertir de UTC a hora de Lima
+        LocalDateTime horaSalidaLima = convertirDeUTC(horaSalidaUTC, HUSO_LIMA);
+        LocalDateTime horaLlegadaLima = convertirDeUTC(horaLlegadaUTC, HUSO_LIMA);
+
+        // Ajustar si llega al día siguiente
+        if (horaLlegadaLima.isBefore(horaSalidaLima)) {
+            horaLlegadaLima = horaLlegadaLima.plusDays(1);
         }
 
-        snapshot.setDurationSeconds(duracionReal); // ✅ Duración REAL
-        // ============================================================================
+        // Guardar horas en hora de Lima para la simulación
+        snapshot.setDepartureTime(horaSalidaLima);
+        snapshot.setArrivalTime(horaLlegadaLima);
+
+        // Calcular duración real
+        Duration duration = Duration.between(horaSalidaLima, horaLlegadaLima);
+        snapshot.setDurationSeconds(duration.getSeconds());
+        // ==========================================================
 
         snapshot.setElapsedSeconds(0);
 
@@ -114,13 +124,17 @@ public class SimulationEngine {
     }
 
     /**
-     * Convierte una hora local a UTC restando el huso horario
-     * Ejemplo: 10:00 en Lima (UTC-5) = 15:00 UTC
+     * Convierte una hora local a UTC
      */
     private LocalDateTime convertirAUTC(LocalDateTime fechaLocal, int husoHorario) {
         return fechaLocal.minusHours(husoHorario);
     }
-
+    /**
+     * Convierte UTC a una zona horaria específica
+     */
+    private LocalDateTime convertirDeUTC(LocalDateTime fechaUTC, int husoHorario) {
+        return fechaUTC.plusHours(husoHorario);
+    }
     /**
      * Actualiza el estado de todos los vuelos según el tiempo simulado
      */
@@ -229,16 +243,18 @@ public class SimulationEngine {
         long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
 
         for (FlightSnapshot flight : allFlights) {
+            // Ahora departureTime y arrivalTime ya están en UTC
             long departSeconds = Duration.between(
                     simulation.getStartTime(),
-                    flight.getDepartureTime()
+                    flight.getDepartureTime()  // ← Ya es UTC
             ).getSeconds();
 
             long arrivalSeconds = Duration.between(
                     simulation.getStartTime(),
-                    flight.getArrivalTime()
+                    flight.getArrivalTime()  // ← Ya es UTC
             ).getSeconds();
 
+            // ✅ Ya funciona correctamente, no necesita cambios
             if (departSeconds > previousSeconds && departSeconds <= currentSeconds) {
                 newEvents.add(new SimulationEvent(
                         "Vuelo " + flight.getFlightCode() + " despegó de " + flight.getOrigin(),
@@ -255,6 +271,7 @@ public class SimulationEngine {
                 ));
             }
         }
+
 
         for (WarehouseSnapshot warehouse : warehouses) {
             if ("critical".equals(warehouse.getStatus()) || "full".equals(warehouse.getStatus())) {

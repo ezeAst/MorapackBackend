@@ -45,7 +45,10 @@ public class SimulationService {
     public SimulationResponse createSimulation(CreateSimulationRequest request) {
         System.out.println("\n=== 🎮 INICIANDO NUEVA SIMULACIÓN ===");
         System.out.println("Tipo: " + request.getType());
-        System.out.println("Fecha inicio: " + request.getStartTime());
+        System.out.println("Fecha inicio (Lima): " + request.getStartTime());
+
+        // NO CONVERTIR - usar directamente la hora de Lima
+        LocalDateTime startTimeLima = request.getStartTime();
 
         // 1. Cargar datos
         List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertos(aeropuertosPath);
@@ -54,7 +57,7 @@ public class SimulationService {
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos);
         List<Pedido> pedidos = LectorCSV.leerPedidos(pedidosPath);
 
-        // 2. Ejecutar GRASP (instantáneo)
+        // 2. Ejecutar GRASP
         Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
 
         if (request.getAlphaGrasp() != null && request.getTamanoRcl() != null) {
@@ -65,18 +68,25 @@ public class SimulationService {
 
         System.out.println("✅ Solución GRASP generada - Fitness: " + solucion.getFitness());
 
-        // 3. Crear simulación
+        // 3. Crear simulación con startTime en hora de Lima
         Simulation simulation = new Simulation();
         simulation.setType(request.getType());
-        simulation.setStartTime(request.getStartTime());
+        simulation.setStartTime(startTimeLima);  // ← Hora de Lima directamente
         simulation.setSolucion(solucion);
 
-        // 4. Inicializar engine con coordenadas
+        // 4. Inicializar engine
         simulationEngine.initializeCoordinatesCache(aeropuertos);
 
-        // 5. Generar snapshots iniciales
-        List<FlightSnapshot> flights = simulationEngine.generateInitialFlightSnapshots(solucion, request.getStartTime());
-        List<WarehouseSnapshot> warehouses = simulationEngine.generateWarehouseSnapshots(aeropuertos, 0, request.getStartTime());
+        // 5. Generar snapshots (los vuelos se convertirán a hora Lima internamente)
+        List<FlightSnapshot> flights = simulationEngine.generateInitialFlightSnapshots(
+                solucion,
+                startTimeLima
+        );
+        List<WarehouseSnapshot> warehouses = simulationEngine.generateWarehouseSnapshots(
+                aeropuertos,
+                0,
+                startTimeLima
+        );
 
         // 6. Guardar en memoria
         activeSimulations.put(simulation.getId(), simulation);
