@@ -44,7 +44,7 @@ public class PlanificadorService {
         // 3. Leer vuelos
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos);
 
-        // 4. Leer pedidos
+        // 4.Leer pedidos
         //List<Pedido> pedidos = LectorCSV.leerPedidos(pedidosPath);
         //4. Leer Pedidos de la BD
         List<Pedido> pedidos = pedidoRepository.findAll();
