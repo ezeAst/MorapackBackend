@@ -1,13 +1,26 @@
 package com.morapack.algoritmologistica.algorithm.models;
 
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "pedido")
 public class Pedido {
 
     // === Atributos ===
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column (name = "id")
+    private Long id;
+    @Column (name = "dia")
     private int dia;                   // Día de registro
+    private int mes;
     private int hora;                  // Hora de registro
     private int minuto;                // Minuto de registro
     private String aeropuertoDestino;  // Código del aeropuerto destino (ej: "SKBO")
     private int cantidad;              // Cantidad de productos (1-999)
+    private int cantidadCumplida;      //cantidad asignada del pedido
+    private String idCliente;          // Identificador del cliente
+
 
     public int getCantidadCumplida() {
         return cantidadCumplida;
@@ -17,8 +30,7 @@ public class Pedido {
         this.cantidadCumplida = cantidadCumplida;
     }
 
-    private int cantidadCumplida;      //cantidad asignada del pedido
-    private String idCliente;          // Identificador del cliente
+
 
     // === Constructores ===
     public Pedido() {
@@ -34,7 +46,28 @@ public class Pedido {
         this.idCliente = idCliente;
     }
 
+    public Pedido(int dia, int mes, int hora, int minuto, String aeropuertoDestino, int cantidad, int cantidadCumplida, String idCliente) {
+        this.dia = dia;
+        this.mes = mes;
+        this.hora = hora;
+        this.minuto = minuto;
+        this.aeropuertoDestino = aeropuertoDestino;
+        this.cantidad = cantidad;
+        this.cantidadCumplida = cantidadCumplida;
+        this.idCliente = idCliente;
+    }
+
     // === Getters y Setters ===
+
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
     public int getDia() {
         return dia;
     }
@@ -81,6 +114,14 @@ public class Pedido {
 
     public void setIdCliente(String idCliente) {
         this.idCliente = idCliente;
+    }
+
+    public int getMes() {
+        return mes;
+    }
+
+    public void setMes(int mes) {
+        this.mes = mes;
     }
 
     @Override

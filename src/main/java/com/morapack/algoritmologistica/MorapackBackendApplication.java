@@ -12,7 +12,10 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
         "com.morapack.backend"
 })
 @EnableJpaRepositories(basePackages = "com.morapack.backend.repository")
-@EntityScan(basePackages = "com.morapack.backend.entity")
+@EntityScan(basePackages = {
+        "com.morapack.algoritmologistica.algorithm.models", // Pedido
+        "com.morapack.backend.entity"                       // otras entidades que tengas
+})
 public class MorapackBackendApplication {
 
     public static void main(String[] args) {
