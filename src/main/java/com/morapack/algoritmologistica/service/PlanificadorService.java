@@ -8,6 +8,8 @@ import com.morapack.backend.repository.PedidoRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -34,27 +36,20 @@ public class PlanificadorService {
     public Solucion ejecutarPlanificacion() {
         System.out.println("=== INICIANDO PLANIFICACIÓN DESDE SERVICE ===\n");
 
-        // 1. Leer aeropuertos
         List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertos(aeropuertosPath);
-
-        // 2. Identificar sedes principales (Lima, Bruselas, Baku)
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
 
-        // 3. Leer vuelos
-        List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos);
+        // ✅ USAR FECHA POR DEFECTO (enero 2025)
+        LocalDateTime startTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+        List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
-        // 4.Leer pedidos
-        //List<Pedido> pedidos = LectorCSV.leerPedidos(pedidosPath);
-        //4. Leer Pedidos de la BD
         List<Pedido> pedidos = pedidoRepository.findAll();
-
 
         System.out.println("\n=== DATOS CARGADOS CORRECTAMENTE ===\n");
 
-        // 5. Crear planificador y ejecutar
         Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
-        Solucion solucion = planificador.ejecutarPlanificacion();
+        Solucion solucion = planificador.ejecutarPlanificacion(2025);  // ← Pasar año
 
         System.out.println("\n=== SOLUCIÓN GENERADA ===");
         System.out.println("Fitness: " + solucion.getFitness());
@@ -76,14 +71,14 @@ public class PlanificadorService {
         // Cargar datos
         List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertos(aeropuertosPath);
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
-        List<Vuelo> vuelos = LectorCSV.leerVuelos(rutaVuelos, aeropuertos);
+        List<Vuelo> vuelos = new ArrayList<>();
         List<Pedido> pedidos = LectorCSV.leerPedidos(rutaPedidos);
 
         // Crear y configurar planificador
         Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
         planificador.setParametrosGRASP(alphaGRASP, tamanoRCL);
 
-        return planificador.ejecutarPlanificacion();
+        return planificador.ejecutarPlanificacion(2025);
     }
 
     /**
@@ -98,7 +93,7 @@ public class PlanificadorService {
      */
     public List<Vuelo> obtenerVuelos() {
         List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertos(aeropuertosPath);
-        return LectorCSV.leerVuelos(vuelosPath, aeropuertos);
+        return new ArrayList<>();
     }
 
     /**

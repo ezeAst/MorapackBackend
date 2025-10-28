@@ -133,13 +133,14 @@ public class LectorCSV {
     }
 
     /**
-     * Lee el archivo de vuelos y genera instancias para cada día de la semana
-     * Formato: ORIGEN-DESTINO-HH:MM-HH:MM-CAPACIDAD
+     * Lee el archivo de vuelos y genera instancias para la semana específica
      * @param rutaArchivo Ruta del archivo (ej: "data/vuelos.txt")
-     * @param aeropuertos Lista de aeropuertos (para buscar referencias)
+     * @param aeropuertos Lista de aeropuertos
+     * @param startTime Fecha de inicio de la semana (hora Lima)
      * @return Lista de vuelos (7 instancias por cada plan de vuelo)
      */
-    public static List<Vuelo> leerVuelos(String rutaArchivo, List<Aeropuerto> aeropuertos) {
+    public static List<Vuelo> leerVuelos(String rutaArchivo, List<Aeropuerto> aeropuertos,
+                                         LocalDateTime startTime) {
         List<Vuelo> vuelos = new ArrayList<>();
 
         // Crear mapa para búsqueda rápida de aeropuertos
@@ -149,7 +150,6 @@ public class LectorCSV {
         }
 
         try {
-            // Leer desde classpath (resources)
             ClassPathResource resource = new ClassPathResource(rutaArchivo);
             BufferedReader br = new BufferedReader(
                     new InputStreamReader(resource.getInputStream(), "UTF-8")
@@ -159,12 +159,10 @@ public class LectorCSV {
             int planesLeidos = 0;
 
             while ((linea = br.readLine()) != null) {
-                // Saltar líneas vacías
                 if (linea.trim().isEmpty()) {
                     continue;
                 }
 
-                // Parsear formato: ORIGEN-DESTINO-HH:MM-HH:MM-CAPACIDAD
                 String[] partes = linea.trim().split("-");
 
                 if (partes.length >= 5) {
@@ -174,7 +172,6 @@ public class LectorCSV {
                     String[] horaLlegadaParts = partes[3].split(":");
                     int capacidad = Integer.parseInt(partes[4]);
 
-                    // Buscar aeropuertos
                     Aeropuerto origen = mapaAeropuertos.get(codigoOrigen);
                     Aeropuerto destino = mapaAeropuertos.get(codigoDestino);
 
@@ -188,10 +185,21 @@ public class LectorCSV {
                     int horaLlegada = Integer.parseInt(horaLlegadaParts[0]);
                     int minutoLlegada = Integer.parseInt(horaLlegadaParts[1]);
 
-                    // Crear 7 instancias del vuelo (uno por cada día de la semana)
-                    for (int dia = 1; dia <= 7; dia++) {
-                        LocalDateTime fechaSalida = LocalDateTime.of(2025, 1, dia, horaSalida, minutoSalida);
-                        LocalDateTime fechaLlegada = LocalDateTime.of(2025, 1, dia, horaLlegada, minutoLlegada);
+                    // ✅ CREAR 7 INSTANCIAS DEL VUELO PARA LA SEMANA ESPECÍFICA
+                    for (int dia = 0; dia < 7; dia++) {
+                        LocalDateTime fechaSalida = startTime
+                                .plusDays(dia)
+                                .withHour(horaSalida)
+                                .withMinute(minutoSalida)
+                                .withSecond(0)
+                                .withNano(0);
+
+                        LocalDateTime fechaLlegada = startTime
+                                .plusDays(dia)
+                                .withHour(horaLlegada)
+                                .withMinute(minutoLlegada)
+                                .withSecond(0)
+                                .withNano(0);
 
                         // Si la hora de llegada es menor que la de salida, es del día siguiente
                         if (fechaLlegada.isBefore(fechaSalida)) {
@@ -209,6 +217,7 @@ public class LectorCSV {
             br.close();
             System.out.println("✅ Planes de vuelo leídos: " + planesLeidos);
             System.out.println("✅ Instancias de vuelos generadas: " + vuelos.size() + " (7 días)");
+            System.out.println("📅 Semana: " + startTime + " → " + startTime.plusDays(7));
 
         } catch (IOException e) {
             System.err.println("❌ Error al leer archivo de vuelos: " + e.getMessage());
