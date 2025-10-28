@@ -4,6 +4,7 @@ import com.morapack.algoritmologistica.algorithm.models.*;
 import com.morapack.algoritmologistica.algorithm.solver.Planificador;
 import com.morapack.algoritmologistica.algorithm.solver.Solucion;
 import com.morapack.algoritmologistica.algorithm.util.LectorCSV;
+import com.morapack.backend.repository.PedidoRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +22,12 @@ public class PlanificadorService {
     @Value("${app.data.pedidos-path:data/pedidos_m.txt}")
     private String pedidosPath;
 
+    private final PedidoRepository pedidoRepository;
+
+    public PlanificadorService(PedidoRepository pedidoRepository) {
+        this.pedidoRepository = pedidoRepository;
+    }
+
     /**
      * Ejecuta la planificación completa usando GRASP
      */
@@ -37,8 +44,11 @@ public class PlanificadorService {
         // 3. Leer vuelos
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos);
 
-        // 4. Leer pedidos
-        List<Pedido> pedidos = LectorCSV.leerPedidos(pedidosPath);
+        // 4.Leer pedidos
+        //List<Pedido> pedidos = LectorCSV.leerPedidos(pedidosPath);
+        //4. Leer Pedidos de la BD
+        List<Pedido> pedidos = pedidoRepository.findAll();
+
 
         System.out.println("\n=== DATOS CARGADOS CORRECTAMENTE ===\n");
 
