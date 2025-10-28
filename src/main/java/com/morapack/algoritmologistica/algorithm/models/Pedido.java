@@ -12,13 +12,20 @@ public class Pedido {
     @Column (name = "id")
     private Long id;
     @Column (name = "dia")
-    private int dia;                   // Día de registro
+    private int dia;                    // Día de registro
+    @Column (name = "mes")
     private int mes;
+    @Column (name = "hora")
     private int hora;                  // Hora de registro
+    @Column (name = "minuto")
     private int minuto;                // Minuto de registro
+    @Column (name = "aeropuerto_destino")
     private String aeropuertoDestino;  // Código del aeropuerto destino (ej: "SKBO")
+    @Column (name = "cantidad")
     private int cantidad;              // Cantidad de productos (1-999)
+    @Column (name = "cantidad_cumplida")
     private int cantidadCumplida;      //cantidad asignada del pedido
+    @Column (name = "id_cliente")
     private String idCliente;          // Identificador del cliente
 
 
