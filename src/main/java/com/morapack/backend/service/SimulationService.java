@@ -33,6 +33,8 @@ public class SimulationService {
     private final Map<String, Simulation> activeSimulations = new ConcurrentHashMap<>();
     private final Map<String, List<FlightSnapshot>> simulationFlights = new ConcurrentHashMap<>();
     private final Map<String, List<Aeropuerto>> simulationAeropuertos = new ConcurrentHashMap<>();
+    private final Map<String, List<OrderSnapshot>> simulationOrders = new ConcurrentHashMap<>();
+    private final Map<String, List<OrderSnapshot>> deliveredOrders = new ConcurrentHashMap<>();
     private final Map<String, Long> lastUpdateSeconds = new ConcurrentHashMap<>();
 
     public SimulationService(SimulationEngine simulationEngine) {
@@ -88,10 +90,28 @@ public class SimulationService {
                 startTimeLima
         );
 
-        // 6. Guardar en memoria
+        // 6. Inicializar pedidos
+        List<OrderSnapshot> orderSnapshots = pedidos.stream()
+            .map(pedido -> {
+                OrderSnapshot snapshot = new OrderSnapshot();
+                snapshot.setOrderId(pedido.getIdCliente()); // Usamos el ID del cliente como ID del pedido por ahora
+                snapshot.setDestinationAirport(pedido.getAeropuertoDestino());
+                snapshot.setStatus("pending");
+                snapshot.setClientId(pedido.getIdCliente());
+                snapshot.setDay(pedido.getDia());
+                snapshot.setHour(pedido.getHora());
+                snapshot.setMinute(pedido.getMinuto());
+                snapshot.setProgressPercentage(0.0);
+                return snapshot;
+            })
+            .toList();
+
+        // 7. Guardar en memoria
         activeSimulations.put(simulation.getId(), simulation);
         simulationFlights.put(simulation.getId(), flights);
         simulationAeropuertos.put(simulation.getId(), aeropuertos);
+        simulationOrders.put(simulation.getId(), new ArrayList<>(orderSnapshots));
+        deliveredOrders.put(simulation.getId(), new ArrayList<>());
         lastUpdateSeconds.put(simulation.getId(), 0L);
 
         System.out.println("✅ Simulación creada con ID: " + simulation.getId());
@@ -164,6 +184,14 @@ public class SimulationService {
         int currentHour = currentSimulatedTime.getHour();
         int currentMinute = currentSimulatedTime.getMinute();
 
+        // Actualizar estado de los pedidos
+        // Actualizar estado de los pedidos
+        List<OrderSnapshot> orders = simulationOrders.get(simulationId);
+        List<OrderSnapshot> delivered = deliveredOrders.get(simulationId);
+
+        // Actualizar estado de pedidos + emitir eventos
+        updateOrderStates(simulationId, simulation, orders, delivered, simulation.getSolucion(), currentSimulatedTime);
+
         // Crear respuesta
         SimulationStatusResponse response = new SimulationStatusResponse();
         response.setElapsedSeconds(currentSeconds);
@@ -174,6 +202,8 @@ public class SimulationService {
         response.setCurrentMinute(currentMinute);
         response.setActiveFlights(activeFlights);
         response.setWarehouses(warehouses);
+        response.setActiveOrders(orders);
+        response.setRecentlyDeliveredOrders(delivered.subList(0, Math.min(10, delivered.size())));
         response.setMetrics(metrics);
         response.setRecentEvents(simulation.getRecentEvents(10));
         response.setCurrentDateTime(currentSimulatedTime.toString());
@@ -217,6 +247,79 @@ public class SimulationService {
     /**
      * Obtiene todas las simulaciones activas
      */
+    /**
+     * Actualiza el estado de los pedidos basado en la solución y el tiempo actual
+     */
+    private void updateOrderStates(
+            String simulationId,
+            Simulation simulation,
+            List<OrderSnapshot> orders,
+            List<OrderSnapshot> delivered,
+            Solucion solucion,
+            LocalDateTime currentTime
+    ) {
+        // Iterar sobre cada pedido activo
+        Iterator<OrderSnapshot> iterator = orders.iterator();
+        
+        while (iterator.hasNext()) {
+            OrderSnapshot order = iterator.next();
+            
+            // Verificar si el pedido está programado para este momento
+            LocalDateTime orderTime = currentTime.withDayOfMonth(order.getDay())
+                    .withHour(order.getHour())
+                    .withMinute(order.getMinute());
+            
+            if (currentTime.isBefore(orderTime)) {
+                // El pedido aún no ha llegado
+                order.setStatus("pending");
+                order.setProgressPercentage(0.0);
+                continue;
+            }
+
+            // Verificar si el pedido ha sido asignado a algún vuelo en la solución
+            boolean isAssigned = solucion.getRutas().stream()
+                    .anyMatch(ruta -> ruta.getPedido() != null && 
+                             ruta.getPedido().getIdCliente().equals(order.getClientId()));
+
+            if (!isAssigned) {
+                // El pedido no ha sido asignado a ningún vuelo
+                order.setStatus("pending");
+                order.setProgressPercentage(25.0);
+                continue;
+            }
+
+            // Si el pedido está asignado, está en tránsito
+            order.setStatus("in_transit");
+            order.setProgressPercentage(75.0);
+
+            // Evento: llegada al almacén (primera vez que pasa a in_transit)
+            if (order.getArrivalTime() == null || order.getArrivalTime().isEmpty()) {
+                order.setArrivalTime(currentTime.toString());
+                simulation.addEvent("El pedido " + order.getOrderId() + " acaba de llegar", "ORDER_RECEIVED");
+            }
+
+            // Verificar si el pedido ha sido entregado
+            boolean isDelivered = solucion.getRutas().stream()
+                    .filter(ruta -> ruta.getPedido() != null && 
+                            ruta.getPedido().getIdCliente().equals(order.getClientId()))
+                    .allMatch(ruta -> ruta.getPedido().getCantidadCumplida() >= ruta.getPedido().getCantidad());
+
+            if (isDelivered) {
+                // El pedido ha sido entregado completamente
+                order.setStatus("delivered");
+                order.setProgressPercentage(100.0);
+                order.setDeliveryTime(currentTime.toString());
+
+                // Evento: entrega al cliente (primera vez)
+                simulation.addEvent("El pedido " + order.getOrderId() + " ya se entregó", "ORDER_DELIVERED");
+                
+                // Mover el pedido a la lista de entregados
+                iterator.remove();
+                delivered.add(order);
+            }
+        }
+    }
+
     public List<Map<String, Object>> getAllSimulations() {
         List<Map<String, Object>> simulations = new ArrayList<>();
 
@@ -232,4 +335,6 @@ public class SimulationService {
 
         return simulations;
     }
+
+
 }

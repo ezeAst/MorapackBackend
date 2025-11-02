@@ -8,6 +8,7 @@ import com.morapack.backend.repository.AeropuertoRepository;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -271,7 +272,6 @@ public class SimulationEngine {
                 ));
             }
         }
-
 
         for (WarehouseSnapshot warehouse : warehouses) {
             if ("critical".equals(warehouse.getStatus()) || "full".equals(warehouse.getStatus())) {
