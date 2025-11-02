@@ -18,6 +18,7 @@ public class GRASP {
     private double alpha;                             // Parámetro de aleatorización (0.0 a 1.0)
     private int tamanoRCL;                           // Tamaño de la Lista de Candidatos Restringida
 
+    private Map<String, List<Vuelo>> vuelosPorOrigen;
     // === Constructores ===
     public GRASP() {
         this.pedidos = new ArrayList<>();
@@ -26,6 +27,7 @@ public class GRASP {
         this.sedesPrincipales = new ArrayList<>();
         this.alpha = 0.3;           // Valor por defecto
         this.tamanoRCL = 3;         // Valor por defecto
+        this.vuelosPorOrigen = new HashMap<>();
     }
 
     public GRASP(List<Pedido> pedidos, List<Vuelo> vuelos,
@@ -37,6 +39,7 @@ public class GRASP {
         this.sedesPrincipales = sedesPrincipales;
         this.alpha = alpha;
         this.tamanoRCL = tamanoRCL;
+        inicializarIndiceVuelos();
     }
 
     // === Getters y Setters ===
@@ -94,11 +97,11 @@ public class GRASP {
      * Genera una solución usando GRASP.
      * @return Una solución construida de manera greedy con aleatorización
      */
-    public Solucion generarSolucion(int year) {  // ← NUEVO parámetro
+    public Solucion generarSolucion(int year) { // ← NUEVO parámetro
+        long startTime = System.currentTimeMillis();
         Solucion solucion = new Solucion();
 
         for (Pedido pedido : pedidos) {
-
             int cantidadRestante = pedido.getCantidad();
             int intentos = 0;
             int maxIntentos = 5;
@@ -183,6 +186,10 @@ public class GRASP {
         }
 
         solucion.evaluarSolucion(pedidos, vuelos, aeropuertos);
+        long endTime = System.currentTimeMillis();
+        long duration = endTime - startTime;
+        System.out.println("\n⏱️ TIEMPO DE EJECUCIÓN GRASP: " + duration + " ms (" +
+                (duration / 1000.0) + " segundos)");
 
         return solucion;
     }
@@ -231,9 +238,16 @@ public class GRASP {
     // 3. Obtener vuelos disponibles desde un aeropuerto después de cierto momento
     private List<Vuelo> obtenerVuelosDisponibles(Aeropuerto origen, LocalDateTime despuesDe) {
         List<Vuelo> vuelosDisponibles = new ArrayList<>();
-        for (Vuelo v : vuelos) {
-            if (v.getAeropuertoOrigen().getCodigo().equals(origen.getCodigo())
-                    && (v.getHoraSalida().isAfter(despuesDe) || v.getHoraSalida().isEqual(despuesDe))) {
+
+        // ← USAR EL ÍNDICE en vez de iterar todos los vuelos
+        List<Vuelo> vuelosDesdeOrigen = vuelosPorOrigen.get(origen.getCodigo());
+
+        if (vuelosDesdeOrigen == null) {
+            return vuelosDisponibles;  // No hay vuelos desde este origen
+        }
+
+        for (Vuelo v : vuelosDesdeOrigen) {  // ← Solo itera ~7 vuelos en vez de 210
+            if (v.getHoraSalida().isAfter(despuesDe) || v.getHoraSalida().isEqual(despuesDe)) {
                 vuelosDisponibles.add(v);
             }
         }
@@ -251,13 +265,15 @@ public class GRASP {
         LocalDateTime tiempoLlegada;     // Cuándo llegamos a este aeropuerto
         long tiempoAcumuladoHoras;       // Tiempo total desde el origen
         List<Vuelo> rutaHastaAqui;       // Vuelos tomados hasta este punto
+        int numeroEscalas;
 
         public NodoRuta(Aeropuerto aeropuerto, LocalDateTime tiempoLlegada,
-                        long tiempoAcumuladoHoras, List<Vuelo> rutaHastaAqui) {
+                        long tiempoAcumuladoHoras, List<Vuelo> rutaHastaAqui, int numeroEscalas) {
             this.aeropuerto = aeropuerto;
             this.tiempoLlegada = tiempoLlegada;
             this.tiempoAcumuladoHoras = tiempoAcumuladoHoras;
             this.rutaHastaAqui = new ArrayList<>(rutaHastaAqui);
+            this.numeroEscalas = numeroEscalas;
         }
 
         @Override
@@ -275,6 +291,7 @@ public class GRASP {
         // Set de aeropuertos visitados (para evitar ciclos)
         Set<String> visitados = new HashSet<>();
 
+
         LocalDateTime fechaInicioEnZonaOrigen = convertirEntreZonas(
                 fechaInicio,
                 destino.getHusoHorario(),  // Zona horaria del pedido (destino)
@@ -282,7 +299,7 @@ public class GRASP {
         );
 
         // Nodo inicial
-        NodoRuta nodoInicial = new NodoRuta(origen, fechaInicioEnZonaOrigen, 0, new ArrayList<>());
+        NodoRuta nodoInicial = new NodoRuta(origen, fechaInicioEnZonaOrigen, 0, new ArrayList<>(),0);
         cola.add(nodoInicial);
 
         long plazoMaximoHoras = plazoMaximoDias * 24;
@@ -293,6 +310,10 @@ public class GRASP {
             // Si llegamos al destino
             if (actual.aeropuerto.getCodigo().equals(destino.getCodigo())) {
                 return actual.rutaHastaAqui; // Ruta encontrada
+            }
+
+            if (actual.numeroEscalas > 3) {  // Máximo 3 escalas
+                continue;
             }
 
             // Si ya visitamos este aeropuerto, skip
@@ -365,6 +386,10 @@ public class GRASP {
 
                 long nuevoTiempoAcumulado = actual.tiempoAcumuladoHoras + tiempoEspera + duracionVuelo;
 
+                if (nuevoTiempoAcumulado > plazoMaximoHoras) {
+                    continue;  // No agregar este nodo a la cola
+                }
+
                 // Crear nueva ruta incluyendo este vuelo
                 List<Vuelo> nuevaRuta = new ArrayList<>(actual.rutaHastaAqui);
                 nuevaRuta.add(vuelo);
@@ -374,7 +399,8 @@ public class GRASP {
                         vuelo.getAeropuertoDestino(),
                         vuelo.getHoraLlegada(),
                         nuevoTiempoAcumulado,
-                        nuevaRuta
+                        nuevaRuta,
+                        actual.numeroEscalas + 1
                 );
 
                 cola.add(nuevoNodo);
@@ -505,7 +531,7 @@ public class GRASP {
                 vuelo.cargarProductos(cantidadAsignada);
             }
 
-            LocalDateTime fechaPedido = LocalDateTime.of(2025, 1, pedido.getDia(),
+            LocalDateTime fechaPedido = LocalDateTime.of(2025, pedido.getMes(), pedido.getDia(),
                     pedido.getHora(), pedido.getMinuto());
             boolean cumple = cumplePlazo(opcion.ruta, fechaPedido,
                     buscarAeropuertoPorCodigo(pedido.getAeropuertoDestino()),
@@ -629,6 +655,15 @@ public class GRASP {
         LocalDateTime tiempoUTC = convertirAUTC(tiempo, husoDesde);
         // Convertir a zona destino
         return tiempoUTC.plusHours(husoHasta);
+    }
+
+    private void inicializarIndiceVuelos() {
+        vuelosPorOrigen = new HashMap<>();
+        for (Vuelo v : vuelos) {
+            String origen = v.getAeropuertoOrigen().getCodigo();
+            vuelosPorOrigen.computeIfAbsent(origen, k -> new ArrayList<>()).add(v);
+        }
+        System.out.println("✅ Índice de vuelos creado: " + vuelosPorOrigen.size() + " orígenes");
     }
 
 }
