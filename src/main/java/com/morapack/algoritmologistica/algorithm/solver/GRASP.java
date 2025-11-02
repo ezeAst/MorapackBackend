@@ -17,6 +17,7 @@ public class GRASP {
     // Parámetros de GRASP
     private double alpha;                             // Parámetro de aleatorización (0.0 a 1.0)
     private int tamanoRCL;                           // Tamaño de la Lista de Candidatos Restringida
+    private Map<String, List<Vuelo>> cacheRutasGlobal;
 
     private Map<String, List<Vuelo>> vuelosPorOrigen;
     // === Constructores ===
@@ -40,6 +41,7 @@ public class GRASP {
         this.alpha = alpha;
         this.tamanoRCL = tamanoRCL;
         inicializarIndiceVuelos();
+        this.cacheRutasGlobal = new HashMap<>();
     }
 
     // === Getters y Setters ===
@@ -285,6 +287,28 @@ public class GRASP {
     private List<Vuelo> buscarRutaOptima(Aeropuerto origen, Aeropuerto destino,
                                          LocalDateTime fechaInicio, int plazoMaximoDias) {
 
+        // ← AGREGAR: Generar clave de caché
+        String cacheKey = origen.getCodigo() + "-" + destino.getCodigo() + "-" +
+                fechaInicio.getDayOfMonth();  // Agrupamos por día
+
+        // ← AGREGAR: Verificar si ya tenemos esta ruta en caché
+        if (cacheRutasGlobal.containsKey(cacheKey)) {
+            List<Vuelo> rutaCacheada = cacheRutasGlobal.get(cacheKey);
+
+            // Validar que la ruta sigue siendo factible (capacidades)
+            boolean esFactible = true;
+            for (Vuelo v : rutaCacheada) {
+                if (v.getCapacidadActual() >= v.getCapacidadMaxima()) {
+                    esFactible = false;
+                    break;
+                }
+            }
+
+            if (esFactible) {
+                return rutaCacheada;  // ← Retornar ruta del caché
+            }
+        }
+
         // Priority Queue ordenada por tiempo acumulado
         PriorityQueue<NodoRuta> cola = new PriorityQueue<>();
 
@@ -309,7 +333,10 @@ public class GRASP {
 
             // Si llegamos al destino
             if (actual.aeropuerto.getCodigo().equals(destino.getCodigo())) {
-                return actual.rutaHastaAqui; // Ruta encontrada
+                // GUARDAR EN CACHÉ ANTES DE RETORNAR
+                cacheRutasGlobal.put(cacheKey, actual.rutaHastaAqui);  // ← Solo usa la variable que ya existe
+
+                return actual.rutaHastaAqui;
             }
 
             if (actual.numeroEscalas > 3) {  // Máximo 3 escalas
