@@ -1,6 +1,7 @@
 package com.morapack.backend.dto.response;
 
 import com.morapack.backend.model.FlightSnapshot;
+import com.morapack.backend.model.OrderSnapshot;
 import com.morapack.backend.model.SimulationEvent;
 import com.morapack.backend.model.SimulationMetrics;
 import com.morapack.backend.model.WarehouseSnapshot;
@@ -27,6 +28,8 @@ public class SimulationStatusResponse {
     // Estados actuales
     private List<FlightSnapshot> activeFlights;
     private List<WarehouseSnapshot> warehouses;
+    private List<OrderSnapshot> activeOrders;  // Pedidos en proceso (pending o in_transit)
+    private List<OrderSnapshot> recentlyDeliveredOrders;  // Últimos pedidos entregados
 
     private SimulationMetrics metrics;
     private List<SimulationEvent> recentEvents;

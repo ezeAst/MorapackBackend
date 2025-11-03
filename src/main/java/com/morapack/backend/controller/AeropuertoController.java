@@ -44,4 +44,5 @@ public class AeropuertoController {
         long total = aeropuertoRepository.count();
         return ResponseEntity.ok(Map.of("total", total));
     }
+
 }
