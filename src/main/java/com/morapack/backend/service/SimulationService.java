@@ -7,6 +7,7 @@ import com.morapack.algoritmologistica.algorithm.util.LectorCSV;
 import com.morapack.backend.dto.request.CreateSimulationRequest;
 import com.morapack.backend.dto.response.SimulationResponse;
 import com.morapack.backend.dto.response.SimulationStatusResponse;
+import com.morapack.backend.repository.PedidoRepository;
 import com.morapack.backend.model.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SimulationService {
 
     private final SimulationEngine simulationEngine;
+    private final PedidoRepository pedidoRepository;
 
     @Value("${app.data.aeropuertos-path}")
     private String aeropuertosPath;
@@ -37,9 +39,13 @@ public class SimulationService {
     private final Map<String, List<OrderSnapshot>> deliveredOrders = new ConcurrentHashMap<>();
     private final Map<String, Long> lastUpdateSeconds = new ConcurrentHashMap<>();
 
-    public SimulationService(SimulationEngine simulationEngine) {
+    // ✅ CONSTRUCTOR - Actualizar este también
+    public SimulationService(SimulationEngine simulationEngine,
+                             PedidoRepository pedidoRepository) {  // ← Agregar parámetro
         this.simulationEngine = simulationEngine;
+        this.pedidoRepository = pedidoRepository;  // ← Inicializar
     }
+
 
     /**
      * Crea y ejecuta una nueva simulación
@@ -49,37 +55,67 @@ public class SimulationService {
         System.out.println("Tipo: " + request.getType());
         System.out.println("Fecha inicio (Lima): " + request.getStartTime());
 
-        // NO CONVERTIR - usar directamente la hora de Lima
         LocalDateTime startTimeLima = request.getStartTime();
+        LocalDateTime endTime = startTimeLima.plusWeeks(1);
 
-        // 1. Cargar datos
+        int year = startTimeLima.getYear();
+        int mesInicio = startTimeLima.getMonthValue();
+        int diaInicio = startTimeLima.getDayOfMonth();
+        int mesFin = endTime.getMonthValue();
+        int diaFin = endTime.getDayOfMonth();
+
+        System.out.println("📅 Semana: " + startTimeLima + " → " + endTime);
+        System.out.println("🔍 Buscando pedidos: mes " + mesInicio + " día " + diaInicio +
+                " → mes " + mesFin + " día " + diaFin);
+
+        // 1. Cargar aeropuertos
         List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertos(aeropuertosPath);
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
-        List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos);
-        List<Pedido> pedidos = LectorCSV.leerPedidos(pedidosPath);
 
-        // 2. Ejecutar GRASP
-        Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
+        // 2. ✅ GENERAR VUELOS PARA LA SEMANA ESPECÍFICA
+        List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTimeLima);
+
+        // 3. ✅ FILTRAR PEDIDOS DE LA SEMANA ESPECÍFICA
+        List<Pedido> todosPedidos =pedidoRepository.findAll();
+        List<Pedido> pedidosSemana = new ArrayList<>();
+
+        for (Pedido pedido : todosPedidos) {
+            LocalDateTime fechaPedido = pedido.getFechaPedido(year);
+
+            if (!fechaPedido.isBefore(startTimeLima) && fechaPedido.isBefore(endTime)) {
+                pedidosSemana.add(pedido);
+            }
+        }
+
+        System.out.println("📦 Total pedidos en BD: " + todosPedidos.size());
+        System.out.println("📦 Pedidos en esta semana: " + pedidosSemana.size());
+
+        if (pedidosSemana.isEmpty()) {
+            throw new RuntimeException("❌ No hay pedidos para la semana especificada");
+        }
+
+        // 4. Ejecutar GRASP
+        Planificador planificador = new Planificador(pedidosSemana, vuelos, aeropuertos, sedesPrincipales);
 
         if (request.getAlphaGrasp() != null && request.getTamanoRcl() != null) {
             planificador.setParametrosGRASP(request.getAlphaGrasp(), request.getTamanoRcl());
         }
 
-        Solucion solucion = planificador.ejecutarPlanificacion();
+        Solucion solucion = planificador.ejecutarPlanificacion(year);  // ← Pasar año
 
         System.out.println("✅ Solución GRASP generada - Fitness: " + solucion.getFitness());
 
-        // 3. Crear simulación con startTime en hora de Lima
+        // 5. Crear simulación
         Simulation simulation = new Simulation();
         simulation.setType(request.getType());
-        simulation.setStartTime(startTimeLima);  // ← Hora de Lima directamente
+        simulation.setStartTime(startTimeLima);
         simulation.setSolucion(solucion);
 
-        // 4. Inicializar engine
+        // 6. Inicializar engine
         simulationEngine.initializeCoordinatesCache(aeropuertos);
 
-        // 5. Generar snapshots (los vuelos se convertirán a hora Lima internamente)
+        // 7. Generar snapshots
         List<FlightSnapshot> flights = simulationEngine.generateInitialFlightSnapshots(
                 solucion,
                 startTimeLima
@@ -118,17 +154,17 @@ public class SimulationService {
         System.out.println("🛫 Vuelos totales: " + flights.size());
         System.out.println("🏢 Almacenes: " + warehouses.size());
 
-        // 7. Crear respuesta
+        // 9. Crear respuesta
         SimulationResponse response = new SimulationResponse();
         response.setSimulationId(simulation.getId());
         response.setStatus("running");
         response.setMessage("Simulación iniciada correctamente");
         response.setFlights(flights);
         response.setWarehouses(warehouses);
-        response.setTotalOrders(pedidos.size());
+        response.setTotalOrders(pedidosSemana.size());
         response.setTotalFlights(flights.size());
         response.setTotalPackages(flights.stream().mapToInt(FlightSnapshot::getPackages).sum());
-        response.setEstimatedDurationSeconds(90 * 60); // 90 minutos
+        response.setEstimatedDurationSeconds(90 * 60);
 
         return response;
     }

@@ -94,28 +94,27 @@ public class GRASP {
      * Genera una solución usando GRASP.
      * @return Una solución construida de manera greedy con aleatorización
      */
-    public Solucion generarSolucion() {
+    public Solucion generarSolucion(int year) {  // ← NUEVO parámetro
         Solucion solucion = new Solucion();
 
         for (Pedido pedido : pedidos) {
 
             int cantidadRestante = pedido.getCantidad();
             int intentos = 0;
-            int maxIntentos = 5; // Límite para evitar loop infinito
+            int maxIntentos = 5;
 
             while (cantidadRestante > 0 && intentos < maxIntentos) {
                 intentos++;
 
-                // 1. Identificar continente del destino
                 Aeropuerto aeropuertoDestino = buscarAeropuertoPorCodigo(pedido.getAeropuertoDestino());
                 if (aeropuertoDestino == null) {
                     break;
                 }
 
-                // 2. Evaluar las 3 sedes principales
                 List<OpcionSede> opciones = new ArrayList<>();
-                LocalDateTime fechaPedido = LocalDateTime.of(2025, 1, pedido.getDia(),
-                        pedido.getHora(), pedido.getMinuto());
+
+                // ✅ CONSTRUIR FECHA USANDO EL AÑO PASADO
+                LocalDateTime fechaPedido = pedido.getFechaPedido(year);
 
                 for (Aeropuerto sede : sedesPrincipales) {
                     int plazo = determinarPlazo(sede, aeropuertoDestino);
@@ -133,46 +132,41 @@ public class GRASP {
                     }
                 }
 
-                // 3. Crear RCL
                 List<OpcionSede> rcl = crearRCL(opciones);
 
                 if (rcl.isEmpty()) {
                     System.out.println("ERROR: No hay rutas factibles para pedido " + pedido.getIdCliente() +
                             " (intento " + intentos + ")");
-                    break; // No hay forma de asignar este pedido
+                    break;
                 }
 
-                // 4-6. Asignar productos usando RCL
                 List<Ruta> rutasDelPedido = asignarProductosConRCL(pedido, rcl);
 
                 if (rutasDelPedido.isEmpty()) {
                     System.out.println("ERROR: No se pudo asignar ningún producto del pedido " +
                             pedido.getIdCliente() + " (intento " + intentos + ")");
-                    break; // No hay capacidad disponible
+                    break;
                 }
 
-                // Agregar rutas a la solución
                 for (Ruta ruta : rutasDelPedido) {
                     solucion.agregarRuta(ruta);
                     StringBuilder sb = new StringBuilder();
                     sb.append("INFO: Se le agregó la ruta al pedido ")
-                      .append(pedido.getIdCliente())
-                      .append(" con ")
-                      .append(ruta.getCantidad())
-                      .append(" paquetes. Ruta: ");
+                            .append(pedido.getIdCliente())
+                            .append(" con ")
+                            .append(ruta.getCantidad())
+                            .append(" paquetes. Ruta: ");
                     for (Vuelo vuelo : ruta.getVuelos()) {
                         sb.append(vuelo.getAeropuertoOrigen().getPais())
-                          .append(" -> ");
+                                .append(" -> ");
                     }
-                    sb.append(" Con Hora").append(ruta.getVuelos().getLast().getHoraLlegada());
-                    // Aeropuerto final
+                    sb.append(" Con Hora ").append(ruta.getVuelos().getLast().getHoraLlegada());
                     if (!ruta.getVuelos().isEmpty()) {
                         sb.append(ruta.getVuelos().get(ruta.getVuelos().size()-1).getAeropuertoDestino().getPais());
                     }
                     System.out.println(sb.toString());
                 }
 
-                // Actualizar cantidad restante
                 int asignadosAhora = 0;
                 for (Ruta ruta : rutasDelPedido) {
                     asignadosAhora += ruta.getCantidad();
@@ -181,7 +175,6 @@ public class GRASP {
                 cantidadRestante -= asignadosAhora;
             }
 
-            // Verificar si el pedido se completó
             if (cantidadRestante > 0) {
                 System.out.println("ERROR CRÍTICO: Pedido " + pedido.getIdCliente() +
                         " NO completado. Quedan " + cantidadRestante +

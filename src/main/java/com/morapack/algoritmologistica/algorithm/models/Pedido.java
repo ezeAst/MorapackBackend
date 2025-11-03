@@ -1,26 +1,46 @@
 package com.morapack.algoritmologistica.algorithm.models;
 
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "pedido")
 public class Pedido {
 
-    // === Atributos ===
-    private int dia;                   // Día de registro
-    private int hora;                  // Hora de registro
-    private int minuto;                // Minuto de registro
-    private String aeropuertoDestino;  // Código del aeropuerto destino (ej: "SKBO")
-    private int cantidad;              // Cantidad de productos (1-999)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
 
-    public int getCantidadCumplida() {
-        return cantidadCumplida;
-    }
+    @Column(name = "dia")
+    private int dia;                    // Día del mes (1-31)
 
-    public void setCantidadCumplida(int cantidadCumplida) {
-        this.cantidadCumplida = cantidadCumplida;
-    }
+    @Column(name = "mes")
+    private int mes;                    // Mes del año (1-12)
 
-    private int cantidadCumplida;      //cantidad asignada del pedido
-    private String idCliente;          // Identificador del cliente
+    @Column(name = "hora")
+    private int hora;
 
-    // === Constructores ===
+    @Column(name = "minuto")
+    private int minuto;
+
+    @Column(name = "aeropuerto_destino")
+    private String aeropuertoDestino;
+
+    @Column(name = "cantidad")
+    private int cantidad;
+
+    @Column(name = "cantidad_cumplida")
+    private int cantidadCumplida;
+
+    @Column(name = "id_cliente")
+    private String idCliente;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "estado", nullable = false)
+    private EstadoPedido estado = EstadoPedido.NO_ASIGNADO;
+
+    // === CONSTRUCTORES ===
     public Pedido() {
     }
 
@@ -34,13 +54,51 @@ public class Pedido {
         this.idCliente = idCliente;
     }
 
-    // === Getters y Setters ===
+    public Pedido(int dia, int mes, int hora, int minuto, String aeropuertoDestino,
+                  int cantidad, int cantidadCumplida, String idCliente) {
+        this.dia = dia;
+        this.mes = mes;
+        this.hora = hora;
+        this.minuto = minuto;
+        this.aeropuertoDestino = aeropuertoDestino;
+        this.cantidad = cantidad;
+        this.cantidadCumplida = cantidadCumplida;
+        this.idCliente = idCliente;
+    }
+
+    // === NUEVO MÉTODO: Construir fecha completa ===
+    /**
+     * Construye un LocalDateTime asumiendo un año específico
+     * @param year Año a usar (ej: 2025)
+     * @return Fecha completa del pedido
+     */
+    public LocalDateTime getFechaPedido(int year) {
+        return LocalDateTime.of(year, mes, dia, hora, minuto);
+    }
+
+    // === GETTERS Y SETTERS (mantener todos los existentes) ===
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
     public int getDia() {
         return dia;
     }
 
     public void setDia(int dia) {
         this.dia = dia;
+    }
+
+    public int getMes() {
+        return mes;
+    }
+
+    public void setMes(int mes) {
+        this.mes = mes;
     }
 
     public int getHora() {
@@ -83,10 +141,27 @@ public class Pedido {
         this.idCliente = idCliente;
     }
 
+    public int getCantidadCumplida() {
+        return cantidadCumplida;
+    }
+
+    public void setCantidadCumplida(int cantidadCumplida) {
+        this.cantidadCumplida = cantidadCumplida;
+    }
+
+    public EstadoPedido getEstado() {
+        return estado;
+    }
+
+    public void setEstado(EstadoPedido estado) {
+        this.estado = estado;
+    }
+
     @Override
     public String toString() {
         return "Pedido{" +
                 "dia=" + dia +
+                ", mes=" + mes +
                 ", hora=" + hora +
                 ", minuto=" + minuto +
                 ", aeropuertoDestino='" + aeropuertoDestino + '\'' +
@@ -95,4 +170,3 @@ public class Pedido {
                 '}';
     }
 }
-

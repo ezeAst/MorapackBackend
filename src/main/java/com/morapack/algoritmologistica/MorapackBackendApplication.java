@@ -1,10 +1,12 @@
 package com.morapack.algoritmologistica;
 
+import com.morapack.backend.service.PlanificadorPersistenciaService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
 @ComponentScan(basePackages = {
@@ -12,7 +14,11 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
         "com.morapack.backend"
 })
 @EnableJpaRepositories(basePackages = "com.morapack.backend.repository")
-@EntityScan(basePackages = "com.morapack.backend.entity")
+@EntityScan(basePackages = {
+        "com.morapack.algoritmologistica.algorithm.models", // Pedido
+        "com.morapack.backend.entity"                       // otras entidades que tengas
+})
+@EnableScheduling
 public class MorapackBackendApplication {
 
     public static void main(String[] args) {
@@ -20,5 +26,8 @@ public class MorapackBackendApplication {
         System.out.println("\n=== 🚀 APLICACIÓN INICIADA ===");
         System.out.println("=== 📍 API: http://localhost:8080/api/planificacion ===");
         System.out.println("=== 🏢 Aeropuertos: http://localhost:8080/api/aeropuertos ===\n");
+
+
+
     }
 }

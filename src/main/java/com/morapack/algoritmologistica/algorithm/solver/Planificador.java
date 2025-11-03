@@ -71,15 +71,16 @@ public class Planificador {
      * Ejecuta la planificación completa
      * @return Mejor solución encontrada
      */
-    public Solucion ejecutarPlanificacion() {
+    public Solucion ejecutarPlanificacion(int year) {  // ← NUEVO parámetro
         System.out.println("=== INICIANDO PLANIFICACIÓN ===");
         System.out.println("Modo: " + (usarGA ? "GRASP + GA" : "GRASP solo"));
+        System.out.println("Año: " + year);
         System.out.println();
 
         if (usarGA) {
             return ejecutarGRASP_GA();
         } else {
-            return ejecutarSoloGRASP();
+            return ejecutarSoloGRASP(year);
         }
     }
 
@@ -87,23 +88,19 @@ public class Planificador {
      * Ejecuta solo GRASP (modo actual)
      * @return Mejor solución de GRASP
      */
-    private Solucion ejecutarSoloGRASP() {
+    private Solucion ejecutarSoloGRASP(int year) {  // ← NUEVO parámetro
         System.out.println("--- Ejecutando GRASP ---");
 
-        // Crear instancia de GRASP
         GRASP grasp = new GRASP(pedidos, vuelos, aeropuertos, sedesPrincipales,
                 alphaGRASP, tamanoRCL);
 
-        // Generar solución
-        Solucion solucion = grasp.generarSolucion();
+        Solucion solucion = grasp.generarSolucion(year);  // ← Pasar año
 
-        // Mostrar resumen
         System.out.println("\n--- Solución GRASP generada ---");
         mostrarResumenSolucion(solucion);
 
         return solucion;
     }
-
     /**
      * Ejecuta GRASP para generar población inicial, luego GA para evolucionar
      * @return Mejor solución después de GA
@@ -147,7 +144,7 @@ public class Planificador {
                     alphaGRASP, tamanoRCL);
 
             // Generar solución
-            Solucion solucion = grasp.generarSolucion();
+            Solucion solucion = grasp.generarSolucion(2025);
             poblacion.add(solucion);
 
             System.out.println("    Fitness: " + solucion.getFitness());
