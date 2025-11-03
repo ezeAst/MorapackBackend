@@ -4,12 +4,14 @@ import com.morapack.backend.dto.request.ControlSimulationRequest;
 import com.morapack.backend.dto.request.CreateSimulationRequest;
 import com.morapack.backend.dto.response.SimulationResponse;
 import com.morapack.backend.dto.response.SimulationStatusResponse;
+import com.morapack.backend.service.PlanificadorPersistenciaService;
 import com.morapack.backend.service.SimulationService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,8 +20,11 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class SimulationController {
 
+
     @Autowired
     private SimulationService simulationService;
+
+
 
     /**
      * POST /api/simulations
@@ -101,4 +106,7 @@ public class SimulationController {
                 "version", "1.0.0"
         ));
     }
+
+
+
 }

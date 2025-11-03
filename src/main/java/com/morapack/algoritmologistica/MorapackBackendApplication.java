@@ -1,5 +1,6 @@
 package com.morapack.algoritmologistica;
 
+import com.morapack.backend.service.PlanificadorPersistenciaService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
@@ -25,5 +26,8 @@ public class MorapackBackendApplication {
         System.out.println("\n=== 🚀 APLICACIÓN INICIADA ===");
         System.out.println("=== 📍 API: http://localhost:8080/api/planificacion ===");
         System.out.println("=== 🏢 Aeropuertos: http://localhost:8080/api/aeropuertos ===\n");
+
+
+
     }
 }
