@@ -628,18 +628,43 @@ public class GRASP {
 
         // Validar cada aeropuerto de llegada en la ruta
         for (int i = 0; i < ruta.size(); i++) {
-            Vuelo vuelo = ruta.get(i);
-            Aeropuerto aeropuertoLlegada = vuelo.getAeropuertoDestino();
-            LocalDateTime horaLlegada = vuelo.getHoraLlegada();
+            Vuelo vueloActual = ruta.get(i);
+            Aeropuerto aeropuertoLlegada = vueloActual.getAeropuertoDestino();
+            LocalDateTime horaLlegada = vueloActual.getHoraLlegada();
 
-            // Calcular capacidad disponible
-            int capacidadDisponible = aeropuertoLlegada.getCapacidad() -
+            // Determinar si es destino final o tránsito
+            Vuelo siguienteVuelo = null;
+            if (i < ruta.size() - 1) {
+                siguienteVuelo = ruta.get(i + 1);  // Hay siguiente vuelo (es tránsito)
+            }
+
+            // ← CAMBIO CLAVE: Validar TODO EL PERIODO, no solo un instante
+            // Probar con 1 producto para ver cuánto espacio hay realmente
+            int capacidadDisponibleReal = 0;
+
+            // Buscar la capacidad máxima disponible mediante búsqueda binaria o incremental
+            int capacidadActual = aeropuertoLlegada.getCapacidad() -
                     aeropuertoLlegada.calcularOcupacionEnMomento(horaLlegada);
 
-            capacidadMinima = Math.min(capacidadMinima, capacidadDisponible);
+            // Validar si ese espacio está disponible durante todo el periodo
+            if (aeropuertoLlegada.hayEspacioEnPeriodo(capacidadActual, horaLlegada, siguienteVuelo)) {
+                capacidadDisponibleReal = capacidadActual;
+            } else {
+                // Si no hay espacio, buscar cuánto espacio realmente hay
+                // Esto es costoso, pero más preciso
+                for (int test = 1; test <= capacidadActual; test++) {
+                    if (aeropuertoLlegada.hayEspacioEnPeriodo(test, horaLlegada, siguienteVuelo)) {
+                        capacidadDisponibleReal = test;
+                    } else {
+                        break;  // Ya no cabe más
+                    }
+                }
+            }
 
-            if (capacidadDisponible <= 0) {
-                return 0; // Almacén lleno
+            capacidadMinima = Math.min(capacidadMinima, capacidadDisponibleReal);
+
+            if (capacidadDisponibleReal <= 0) {
+                return 0; // No hay espacio durante el periodo
             }
         }
 
