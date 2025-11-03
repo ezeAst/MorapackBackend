@@ -58,6 +58,28 @@ public class PlanificadorService {
         return solucion;
     }
 
+    public Solucion ejecutarPlanificacion(List<Pedido> pendientes) {
+        List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertos(aeropuertosPath);
+        List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
+        List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
+
+        // ✅ USAR FECHA POR DEFECTO (enero 2025)
+        LocalDateTime startTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+        List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
+
+        List<Pedido> pedidos = pendientes;
+
+
+        Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
+        Solucion solucion = planificador.ejecutarPlanificacion(2025);  // ← Pasar año
+
+        System.out.println("\n=== SOLUCIÓN GENERADA ===");
+        System.out.println("Fitness: " + solucion.getFitness());
+        System.out.println("Rutas: " + solucion.getNumeroDeRutas());
+
+        return solucion;
+    }
+
     /**
      * Ejecuta planificación con parámetros personalizados
      */

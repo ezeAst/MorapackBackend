@@ -36,6 +36,10 @@ public class Pedido {
     @Column(name = "id_cliente")
     private String idCliente;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "estado", nullable = false)
+    private EstadoPedido estado = EstadoPedido.NO_ASIGNADO;
+
     // === CONSTRUCTORES ===
     public Pedido() {
     }
@@ -143,6 +147,14 @@ public class Pedido {
 
     public void setCantidadCumplida(int cantidadCumplida) {
         this.cantidadCumplida = cantidadCumplida;
+    }
+
+    public EstadoPedido getEstado() {
+        return estado;
+    }
+
+    public void setEstado(EstadoPedido estado) {
+        this.estado = estado;
     }
 
     @Override

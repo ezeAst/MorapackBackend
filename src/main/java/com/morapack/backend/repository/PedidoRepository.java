@@ -27,4 +27,15 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
             @Param("mesFin") int mesFin,
             @Param("diaFin") int diaFin
     );
+
+    @Query("SELECT p FROM Pedido p WHERE p.estado = 'NO_ASIGNADO'")
+    List<Pedido> findPendientes();
+
+
+
+
+
+
+
+
 }
