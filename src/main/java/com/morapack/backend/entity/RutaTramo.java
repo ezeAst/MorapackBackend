@@ -1,6 +1,7 @@
 package com.morapack.backend.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "rutas_tramo",
@@ -30,6 +31,9 @@ public class RutaTramo {
 
     @Column(name = "hora_llegada", length = 5)
     private String horaLlegada;  // "HH:MM"
+
+    @Column(name = "fecha", nullable = false)
+    private LocalDate fecha;
 
     @Column(name = "capacidad_usada")
     private Integer capacidadUsada; // opcional
@@ -96,5 +100,13 @@ public class RutaTramo {
 
     public void setCapacidadUsada(Integer capacidadUsada) {
         this.capacidadUsada = capacidadUsada;
+    }
+
+    public LocalDate getFecha() {
+        return fecha;
+    }
+
+    public void setFecha(LocalDate fecha) {
+        this.fecha = fecha;
     }
 }

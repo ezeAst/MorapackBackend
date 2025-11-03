@@ -63,15 +63,32 @@ public class PlanificadorService {
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
 
-        // ✅ USAR FECHA POR DEFECTO (enero 2025)
-        LocalDateTime startTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+        // ✅ CALCULAR FECHA DESDE EL PRIMER PEDIDO
+        LocalDateTime startTime;
+        int year;
+
+        if (pendientes != null && !pendientes.isEmpty()) {
+            // Usar la fecha del primer pedido
+            Pedido primerPedido = pendientes.get(0);
+            year = LocalDateTime.now().getYear(); // Año actual
+            startTime = primerPedido.getFechaPedido(year);
+
+            // Ajustar al inicio del día
+            startTime = startTime.withHour(0).withMinute(0).withSecond(0);
+
+            System.out.println("📅 Fecha calculada desde pedidos: " + startTime);
+        } else {
+            // Fallback: usar fecha actual
+            startTime = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
+            year = startTime.getYear();
+        }
+
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
         List<Pedido> pedidos = pendientes;
 
-
         Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
-        Solucion solucion = planificador.ejecutarPlanificacion(2025);  // ← Pasar año
+        Solucion solucion = planificador.ejecutarPlanificacion(year);
 
         System.out.println("\n=== SOLUCIÓN GENERADA ===");
         System.out.println("Fitness: " + solucion.getFitness());

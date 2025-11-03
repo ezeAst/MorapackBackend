@@ -127,7 +127,7 @@ public class SimulationService {
         );
 
         // 6. Inicializar pedidos
-        List<OrderSnapshot> orderSnapshots = pedidos.stream()
+        List<OrderSnapshot> orderSnapshots = pedidosSemana.stream()
             .map(pedido -> {
                 OrderSnapshot snapshot = new OrderSnapshot();
                 snapshot.setOrderId(pedido.getIdCliente()); // Usamos el ID del cliente como ID del pedido por ahora

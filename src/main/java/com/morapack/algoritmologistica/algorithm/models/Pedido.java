@@ -40,6 +40,9 @@ public class Pedido {
     @Column(name = "estado", nullable = false)
     private EstadoPedido estado = EstadoPedido.NO_ASIGNADO;
 
+    @Column(name = "tramo_actual")
+    private Integer tramoActual = 0;
+
     // === CONSTRUCTORES ===
     public Pedido() {
     }
@@ -155,6 +158,14 @@ public class Pedido {
 
     public void setEstado(EstadoPedido estado) {
         this.estado = estado;
+    }
+
+    public Integer getTramoActual() {
+        return tramoActual;
+    }
+
+    public void setTramoActual(Integer tramoActual) {
+        this.tramoActual = tramoActual;
     }
 
     @Override

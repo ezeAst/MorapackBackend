@@ -18,7 +18,7 @@ public class PlanificacionScheduler {
     }
 
     // corre en el minuto 0, 15, 30, 45 de cada hora; zona Perú
-    @Scheduled(cron = "0 */15 * * * *", zone = "America/Lima")
+    @Scheduled(fixedDelay = 30000)
     public void ejecutarPlanificacionPeriodica() {
         String resumen = persistenciaService.ejecutarYGuardar();
         log.info("[Planificador automático] {}", resumen);

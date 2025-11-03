@@ -1,5 +1,6 @@
 package com.morapack.backend.repository;
 
+import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -30,6 +31,8 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
 
     @Query("SELECT p FROM Pedido p WHERE p.estado = 'NO_ASIGNADO'")
     List<Pedido> findPendientes();
+
+    List<Pedido> findByEstadoIn(List<EstadoPedido> estados);
 
 
 
