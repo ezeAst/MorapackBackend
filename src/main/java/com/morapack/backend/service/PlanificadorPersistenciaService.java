@@ -112,7 +112,7 @@ public class PlanificadorPersistenciaService {
             cab.setCantidad(rutaAlg.getCantidad());
 
             // --- Calcular fecha de cada tramo ---
-            LocalDateTime fechaPedido = pedido.getFechaPedido(year);
+            LocalDateTime fechaPedido = pedido.getFechaPedido();
             LocalDate fechaActual = fechaPedido.toLocalDate();
 
             int orden = 0;

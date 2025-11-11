@@ -8,7 +8,6 @@ import java.time.LocalDateTime;
 public class Pedido {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id")
     private Long id;
 
@@ -20,6 +19,9 @@ public class Pedido {
 
     @Column(name = "hora")
     private int hora;
+
+    @Column(name = "anho")
+    private int anho;
 
     @Column(name = "minuto")
     private int minuto;
@@ -72,14 +74,25 @@ public class Pedido {
         this.idCliente = idCliente;
     }
 
+    public Pedido(int dia, int mes, int hora, int anho, int minuto, String aeropuertoDestino, int cantidad, String idCliente) {
+        this.dia = dia;
+        this.mes = mes;
+        this.hora = hora;
+        this.anho = anho;
+        this.minuto = minuto;
+        this.aeropuertoDestino = aeropuertoDestino;
+        this.cantidad = cantidad;
+        this.idCliente = idCliente;
+    }
+
     // === NUEVO MÉTODO: Construir fecha completa ===
     /**
      * Construye un LocalDateTime asumiendo un año específico
-     * @param year Año a usar (ej: 2025)
+     *
      * @return Fecha completa del pedido
      */
-    public LocalDateTime getFechaPedido(int year) {
-        return LocalDateTime.of(year, mes, dia, hora, minuto);
+    public LocalDateTime getFechaPedido() {
+        return LocalDateTime.of(anho, mes, dia, hora, minuto);
     }
 
     // === GETTERS Y SETTERS (mantener todos los existentes) ===
@@ -113,6 +126,14 @@ public class Pedido {
 
     public void setHora(int hora) {
         this.hora = hora;
+    }
+
+    public int getAnho() {
+        return anho;
+    }
+
+    public void setAnho(int anho) {
+        this.anho = anho;
     }
 
     public int getMinuto() {

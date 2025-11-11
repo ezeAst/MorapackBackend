@@ -81,7 +81,7 @@ public class SimulationService {
         List<Pedido> pedidosSemana = new ArrayList<>();
 
         for (Pedido pedido : todosPedidos) {
-            LocalDateTime fechaPedido = pedido.getFechaPedido(year);
+            LocalDateTime fechaPedido = pedido.getFechaPedido();
 
             if (!fechaPedido.isBefore(startTimeLima) && fechaPedido.isBefore(endTime)) {
                 pedidosSemana.add(pedido);

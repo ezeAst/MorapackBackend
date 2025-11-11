@@ -230,10 +230,14 @@ public class OperacionesController {
             double ocupacion = (aero.getCapacidadActual() * 100.0) / aero.getCapacidad();
             almacen.put("ocupacion", Math.round(ocupacion * 10) / 10.0);
 
+            // Estados permitidos: normal, warning, critical.
+            // Se elimina el estado "full" y se considera >=100 como critical.
             String status = "normal";
-            if (ocupacion >= 100) status = "full";
-            else if (ocupacion >= 90) status = "critical";
-            else if (ocupacion >= 70) status = "warning";
+            if (ocupacion >= 90) {
+                status = "critical"; // incluye saturación >=100
+            } else if (ocupacion >= 70) {
+                status = "warning";
+            }
 
             almacen.put("status", status);
             almacen.put("lat", aero.getLat());

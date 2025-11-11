@@ -119,7 +119,7 @@ public class GRASP {
                 List<OpcionSede> opciones = new ArrayList<>();
 
                 // ✅ CONSTRUIR FECHA USANDO EL AÑO PASADO
-                LocalDateTime fechaPedido = pedido.getFechaPedido(year);
+                LocalDateTime fechaPedido = pedido.getFechaPedido();
 
                 for (Aeropuerto sede : sedesPrincipales) {
                     int plazo = determinarPlazo(sede, aeropuertoDestino);

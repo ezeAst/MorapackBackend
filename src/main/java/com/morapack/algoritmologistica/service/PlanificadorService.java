@@ -81,7 +81,7 @@ public class PlanificadorService {
             // Usar la fecha del primer pedido
             Pedido primerPedido = pendientes.get(0);
             year = LocalDateTime.now().getYear(); // Año actual
-            startTime = primerPedido.getFechaPedido(year);
+            startTime = primerPedido.getFechaPedido();
 
             // Ajustar al inicio del día
             startTime = startTime.withHour(0).withMinute(0).withSecond(0);

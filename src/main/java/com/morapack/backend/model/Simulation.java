@@ -25,6 +25,7 @@ public class Simulation {
     private long simulationStartMillis;
     private long elapsedSimulatedSeconds;
     private long pausedDurationMillis;
+    private long pauseStartedAtMillis = -1; // -1 indica que no está en pausa actualmente
 
     // Escala temporal: 1 semana (604800 seg) en 90 min (5400 seg)
     // Factor: 1 segundo real = 112 segundos simulados
@@ -54,7 +55,10 @@ public class Simulation {
             return elapsedSimulatedSeconds;
         }
 
-        long realElapsedMillis = System.currentTimeMillis() - simulationStartMillis - pausedDurationMillis;
+        long now = System.currentTimeMillis();
+        long realElapsedMillis = now - simulationStartMillis - pausedDurationMillis;
+        // Evitar valores negativos por desajustes de pausa/reanudar
+        if (realElapsedMillis < 0) realElapsedMillis = 0;
         long realElapsedSeconds = realElapsedMillis / 1000;
 
         return (long) (realElapsedSeconds * TIME_SCALE);
@@ -81,6 +85,7 @@ public class Simulation {
     public void pause() {
         if (status == SimulationStatus.RUNNING) {
             elapsedSimulatedSeconds = calculateElapsedSimulatedSeconds();
+            pauseStartedAtMillis = System.currentTimeMillis();
             status = SimulationStatus.PAUSED;
         }
     }
@@ -91,8 +96,10 @@ public class Simulation {
     public void resume() {
         if (status == SimulationStatus.PAUSED) {
             long currentMillis = System.currentTimeMillis();
-            pausedDurationMillis += (currentMillis - simulationStartMillis);
-            simulationStartMillis = currentMillis;
+            if (pauseStartedAtMillis > 0) {
+                pausedDurationMillis += (currentMillis - pauseStartedAtMillis);
+            }
+            pauseStartedAtMillis = -1;
             status = SimulationStatus.RUNNING;
         }
     }
