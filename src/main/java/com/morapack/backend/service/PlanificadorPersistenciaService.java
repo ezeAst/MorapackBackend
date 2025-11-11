@@ -67,7 +67,7 @@ public class PlanificadorPersistenciaService {
 
         List<Pedido> pendientesRango = todosPendientes.stream()
                 .filter(p -> {
-                    LocalDateTime fechaPedido = p.getFechaPedido(year);
+                    LocalDateTime fechaPedido = p.getFechaPedido();
                     return !fechaPedido.isBefore(rangoInicio) && fechaPedido.isBefore(rangoFin);
                 })
                 .collect(Collectors.toList());
@@ -107,7 +107,7 @@ public class PlanificadorPersistenciaService {
             cab.setCantidad(rutaAlg.getCantidad());
 
             // --- Calcular fecha de cada tramo ---
-            LocalDateTime fechaPedido = pedido.getFechaPedido(year);
+            LocalDateTime fechaPedido = pedido.getFechaPedido();
             LocalDate fechaActual = fechaPedido.toLocalDate();
 
             int orden = 0;
