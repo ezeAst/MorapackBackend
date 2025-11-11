@@ -45,6 +45,9 @@ public class Pedido {
     @Column(name = "tramo_actual")
     private Integer tramoActual = 0;
 
+    @Column(name = "hora_entrega")
+    private LocalDateTime horaEntrega;
+
     // === CONSTRUCTORES ===
     public Pedido() {
     }
@@ -188,6 +191,15 @@ public class Pedido {
     public void setTramoActual(Integer tramoActual) {
         this.tramoActual = tramoActual;
     }
+
+    public LocalDateTime getHoraEntrega() {
+        return horaEntrega;
+    }
+
+    public void setHoraEntrega(LocalDateTime horaEntrega) {
+        this.horaEntrega = horaEntrega;
+    }
+
 
     @Override
     public String toString() {

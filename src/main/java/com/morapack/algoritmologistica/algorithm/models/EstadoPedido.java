@@ -5,5 +5,6 @@ public enum EstadoPedido {
     ASIGNADO,
     EN_TRANSITO,
     EN_ALMACEN_INTERMEDIO,
-    ENTREGADO
+    ENTREGADO,
+    RECOGIDO  // ← AGREGAR ESTE
 }

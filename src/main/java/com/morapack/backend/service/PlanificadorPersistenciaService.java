@@ -48,15 +48,18 @@ public class PlanificadorPersistenciaService {
 
     @Transactional
     public String ejecutarYGuardar() {
-        // 1) Calcular rango de 15 minutos actual (hora de Lima)
-        LocalDateTime ahora = LocalDateTime.now(); // Hora del servidor (Lima)
-        int minutoActual = ahora.getMinute();
 
-        // Redondear al inicio del bloque de 15 min: 0, 15, 30, 45
-        int minutoInicio = (minutoActual / 15) * 15;
+        // 1) Calcular ventana de búsqueda: 72 horas atrás → ahora
+        LocalDateTime ahora = LocalDateTime.now();
 
-        LocalDateTime rangoInicio = ahora.withMinute(minutoInicio).withSecond(0).withNano(0);
-        LocalDateTime rangoFin = rangoInicio.plusMinutes(15);
+        // ✅ Inicio: hace 72 horas (3 días - plazo máximo de entrega)
+        LocalDateTime rangoInicio = ahora.minusHours(72);
+
+        // ✅ Fin: ahora (hora actual)
+        LocalDateTime rangoFin = ahora;
+
+        System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
+        System.out.println("   (Buscando pedidos atrasados y actuales)");
 
         System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
 
@@ -67,8 +70,10 @@ public class PlanificadorPersistenciaService {
 
         List<Pedido> pendientesRango = todosPendientes.stream()
                 .filter(p -> {
-                    LocalDateTime fechaPedido = p.getFechaPedido();
-                    return !fechaPedido.isBefore(rangoInicio) && fechaPedido.isBefore(rangoFin);
+                    LocalDateTime fechaPedido = p.getFechaPedido(year);
+                    // Comparar: fechaPedido >= rangoInicio && fechaPedido <= rangoFin
+                    return (fechaPedido.isAfter(rangoInicio) || fechaPedido.isEqual(rangoInicio))
+                            && (fechaPedido.isBefore(rangoFin) || fechaPedido.isEqual(rangoFin));
                 })
                 .collect(Collectors.toList());
 

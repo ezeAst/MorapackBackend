@@ -7,10 +7,12 @@ import com.morapack.algoritmologistica.algorithm.util.LectorCSV;
 import com.morapack.backend.repository.PedidoRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import com.morapack.backend.repository.AeropuertoRepository;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class PlanificadorService {
@@ -25,9 +27,14 @@ public class PlanificadorService {
     private String pedidosPath;
 
     private final PedidoRepository pedidoRepository;
+    private final AeropuertoRepository aeropuertoRepository;  // ← AGREGAR
 
-    public PlanificadorService(PedidoRepository pedidoRepository) {
+    public PlanificadorService(
+            PedidoRepository pedidoRepository,
+            AeropuertoRepository aeropuertoRepository  // ← AGREGAR
+    ) {
         this.pedidoRepository = pedidoRepository;
+        this.aeropuertoRepository = aeropuertoRepository;  // ← AGREGAR
     }
 
     /**
@@ -59,7 +66,10 @@ public class PlanificadorService {
     }
 
     public Solucion ejecutarPlanificacion(List<Pedido> pendientes) {
-        List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertos(aeropuertosPath);
+        List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertosDesdeDB(
+                aeropuertoRepository,
+                pedidoRepository
+        );
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
 
@@ -85,9 +95,18 @@ public class PlanificadorService {
 
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
+        // ✅ Filtrar solo vuelos que NO han despegado aún
+        LocalDateTime ahora = LocalDateTime.now();
+        List<Vuelo> vuelosDisponibles = vuelos.stream()
+                .filter(v -> v.getHoraSalida().isAfter(ahora))
+                .collect(Collectors.toList());
+
+        System.out.println("✈️ Vuelos totales: " + vuelos.size());
+        System.out.println("✈️ Vuelos disponibles (futuros): " + vuelosDisponibles.size());
+
         List<Pedido> pedidos = pendientes;
 
-        Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
+        Planificador planificador = new Planificador(pedidos, vuelosDisponibles, aeropuertos, sedesPrincipales);
         Solucion solucion = planificador.ejecutarPlanificacion(year);
 
         System.out.println("\n=== SOLUCIÓN GENERADA ===");

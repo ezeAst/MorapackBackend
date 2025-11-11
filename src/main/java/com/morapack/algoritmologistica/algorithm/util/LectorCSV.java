@@ -1,9 +1,12 @@
 package com.morapack.algoritmologistica.algorithm.util;
 
 import com.morapack.algoritmologistica.algorithm.models.Aeropuerto;
+import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import com.morapack.algoritmologistica.algorithm.models.Vuelo;
-
+import com.morapack.backend.entity.AeropuertoEntity;
+import com.morapack.backend.repository.AeropuertoRepository;
+import com.morapack.backend.repository.PedidoRepository;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.BufferedReader;
@@ -16,6 +19,81 @@ import java.util.List;
 import java.util.Map;
 
 public class LectorCSV {
+
+
+    /**
+     * Lee aeropuertos directamente desde la base de datos
+     * con capacidad DISPONIBLE (máxima - ocupada)
+     * Para operaciones día a día en tiempo real
+     *
+     * @param repository Repositorio de aeropuertos
+     * @return Lista de aeropuertos con capacidad ajustada
+     */
+    public static List<Aeropuerto> leerAeropuertosDesdeDB(
+            AeropuertoRepository aeropuertoRepository,
+            PedidoRepository pedidoRepository
+    ) {
+        List<Aeropuerto> aeropuertos = new ArrayList<>();
+
+        try {
+            List<AeropuertoEntity> entities = aeropuertoRepository.findAll();
+
+            // ✅ Obtener todos los pedidos ASIGNADOS de una sola vez
+            List<Pedido> pedidosAsignados = pedidoRepository.findByEstadoIn(
+                    List.of(EstadoPedido.ASIGNADO, EstadoPedido.EN_TRANSITO)  // ← Ambos
+            );
+
+            // ✅ Calcular ocupación reservada por aeropuerto
+            Map<String, Integer> ocupacionReservada = new HashMap<>();
+            for (Pedido pedido : pedidosAsignados) {
+                String destino = pedido.getAeropuertoDestino();
+                ocupacionReservada.put(
+                        destino,
+                        ocupacionReservada.getOrDefault(destino, 0) + pedido.getCantidad()
+                );
+            }
+
+            for (AeropuertoEntity entity : entities) {
+                // ✅ Calcular capacidad DISPONIBLE (ocupada + reservada)
+                int capacidadMaxima = entity.getCapacidad();
+                int capacidadOcupada = entity.getCapacidadActual();
+                int reservada = ocupacionReservada.getOrDefault(entity.getCodigo(), 0);
+                int ocupacionTotal = capacidadOcupada + reservada;
+                int capacidadDisponible = Math.max(0, capacidadMaxima - ocupacionTotal);
+
+                // Crear aeropuerto con capacidad disponible como "máxima"
+                Aeropuerto aeropuerto = new Aeropuerto(
+                        entity.getCodigo(),
+                        entity.getNombre(),
+                        entity.getPais(),
+                        capacidadDisponible,  // ← Capacidad disponible
+                        entity.getHusoHorario(),
+                        entity.getContinente()
+                );
+
+                // Desde la perspectiva del algoritmo, empieza vacío
+                aeropuerto.setCapacidadActual(0);
+
+                aeropuertos.add(aeropuerto);
+
+                // Log para debug
+                System.out.println("   📦 " + entity.getCodigo() +
+                        " - Ocupado: " + capacidadOcupada +
+                        " + Reservado: " + reservada +
+                        " = Total: " + ocupacionTotal +
+                        " | Disponible: " + capacidadDisponible);
+            }
+
+            System.out.println("✅ Aeropuertos cargados desde BD: " + aeropuertos.size());
+            System.out.println("   (Capacidad ajustada según ocupación actual + reservas)");
+
+        } catch (Exception e) {
+            System.err.println("❌ Error al leer aeropuertos desde BD: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return aeropuertos;
+    }
 
     /**
      * Lee el archivo de aeropuertos desde resources

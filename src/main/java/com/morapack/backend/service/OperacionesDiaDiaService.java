@@ -136,8 +136,8 @@ public class OperacionesDiaDiaService {
 
             // Verificar si es el último tramo
             if (tramoActual == ruta.getTramos().size() - 1) {
-                // Es el destino final
                 pedido.setEstado(EstadoPedido.ENTREGADO);
+                pedido.setHoraEntrega(ahora);  // ← AGREGAR ESTA LÍNEA
                 agregarEvento("✅ Pedido #" + pedido.getId() + " entregado en " + tramo.getDestino());
             } else {
                 // Es un almacén intermedio
