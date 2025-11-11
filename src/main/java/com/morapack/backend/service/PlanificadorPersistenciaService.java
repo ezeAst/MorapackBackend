@@ -70,7 +70,7 @@ public class PlanificadorPersistenciaService {
 
         List<Pedido> pendientesRango = todosPendientes.stream()
                 .filter(p -> {
-                    LocalDateTime fechaPedido = p.getFechaPedido(year);
+                    LocalDateTime fechaPedido = p.getFechaPedido();
                     // Comparar: fechaPedido >= rangoInicio && fechaPedido <= rangoFin
                     return (fechaPedido.isAfter(rangoInicio) || fechaPedido.isEqual(rangoInicio))
                             && (fechaPedido.isBefore(rangoFin) || fechaPedido.isEqual(rangoFin));
