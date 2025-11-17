@@ -4,7 +4,9 @@ package com.morapack.backend.controller;
 import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import com.morapack.backend.repository.PedidoRepository;
+import com.morapack.backend.service.Pedidobatchservice;
 
+import com.morapack.backend.service.Pedidobatchservice;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,10 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -25,6 +24,9 @@ public class PedidoController {
 
     @Autowired
     private PedidoRepository pedidoRepository;
+
+    @Autowired
+    private Pedidobatchservice pedidobatchservice;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -43,46 +45,27 @@ public class PedidoController {
     }
 
     @PostMapping("/importarTxt")
+    @Transactional
     public ResponseEntity<Map<String, Object>> importar(@RequestBody List<Pedido> pedidos) {
         if (pedidos == null || pedidos.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
 
-        int insertados = 0;
-        int duplicados = 0;
-        int errores = 0;
+        long startTime = System.currentTimeMillis();
 
-        for (Pedido p : pedidos) {
-            try {
-                // 1) debe venir con ID (del archivo)
-                if (p.getId() == null) {
-                    errores++;
-                    continue;
-                }
+        // Obtener el último ID de una vez
+        Long ultimoId = pedidoRepository.findMaxId().orElse(0L);
 
-                // 2) si ya existe ese ID, lo saltamos
-                if (pedidoRepository.existsById(p.getId())) {
-                    duplicados++;
-                    continue;
-                }
+        // ✅ USAR JDBC BATCH INSERT (mucho más rápido que JPA)
+        int insertados = pedidobatchservice.insertarPedidosEnLote(pedidos, ultimoId);
 
-                // 3) estado inicial
-                p.setEstado(EstadoPedido.NO_ASIGNADO);
-
-                // 4) guardar con ese ID
-                pedidoRepository.save(p);
-                insertados++;
-
-            } catch (Exception e) {
-                errores++;
-                // log.warn("Error al importar pedido {}: {}", p.getId(), e.getMessage());
-            }
-        }
+        long endTime = System.currentTimeMillis();
+        System.out.println("⚡ Tiempo de inserción: " + (endTime - startTime) + "ms para " + insertados + " pedidos");
 
         Map<String, Object> body = new HashMap<>();
         body.put("insertados", insertados);
-        body.put("duplicados", duplicados);
-        body.put("errores", errores);
+        body.put("duplicados", 0);
+        body.put("errores", 0);
 
         return ResponseEntity.ok(body);
     }

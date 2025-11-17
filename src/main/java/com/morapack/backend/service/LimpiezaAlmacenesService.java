@@ -41,9 +41,7 @@ public class LimpiezaAlmacenesService {
         log.info("🧹 Iniciando limpieza de almacenes...");
 
         // Buscar pedidos ENTREGADOS
-        List<Pedido> pedidosEntregados = pedidoRepository.findByEstadoIn(
-                List.of(EstadoPedido.ENTREGADO)
-        );
+        List<Pedido> pedidosEntregados = pedidoRepository.findEntregadosParaLimpieza();
 
         int limpiados = 0;
         int totalLiberado = 0;

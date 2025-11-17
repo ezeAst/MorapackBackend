@@ -40,6 +40,9 @@ public class PlanificadorService {
     /**
      * Ejecuta la planificación completa usando GRASP
      */
+    /**
+     * Ejecuta la planificación completa usando GRASP
+     */
     public Solucion ejecutarPlanificacion() {
         System.out.println("=== INICIANDO PLANIFICACIÓN DESDE SERVICE ===\n");
 
@@ -51,12 +54,12 @@ public class PlanificadorService {
         LocalDateTime startTime = LocalDateTime.of(2025, 1, 1, 0, 0);
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
-        List<Pedido> pedidos = pedidoRepository.findAll();
+        List<Pedido> pedidos = pedidoRepository.findPendientes();
 
         System.out.println("\n=== DATOS CARGADOS CORRECTAMENTE ===\n");
 
         Planificador planificador = new Planificador(pedidos, vuelos, aeropuertos, sedesPrincipales);
-        Solucion solucion = planificador.ejecutarPlanificacion(2025);  // ← Pasar año
+        Solucion solucion = planificador.ejecutarPlanificacion(2025);
 
         System.out.println("\n=== SOLUCIÓN GENERADA ===");
         System.out.println("Fitness: " + solucion.getFitness());
@@ -96,9 +99,23 @@ public class PlanificadorService {
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
         // ✅ Filtrar solo vuelos que NO han despegado aún
-        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime ahoraLima = LocalDateTime.now(); // Ya está en hora de Lima (UTC-5)
+
         List<Vuelo> vuelosDisponibles = vuelos.stream()
-                .filter(v -> v.getHoraSalida().isAfter(ahora))
+                .filter(v -> {
+                    // Convertir hora de salida (local del aeropuerto) a hora de Lima
+                    int husoOrigen = v.getAeropuertoOrigen().getHusoHorario();
+                    LocalDateTime horaSalidaLocal = v.getHoraSalida();
+
+                    // Paso 1: Convertir a UTC
+                    LocalDateTime horaSalidaUTC = horaSalidaLocal.minusHours(husoOrigen);
+
+                    // Paso 2: Convertir de UTC a Lima (UTC-5)
+                    LocalDateTime horaSalidaLima = horaSalidaUTC.plusHours(-5);
+
+                    // Comparar en la misma zona horaria
+                    return horaSalidaLima.isAfter(ahoraLima);
+                })
                 .collect(Collectors.toList());
 
         System.out.println("✈️ Vuelos totales: " + vuelos.size());
