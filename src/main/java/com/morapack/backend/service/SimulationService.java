@@ -77,18 +77,14 @@ public class SimulationService {
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTimeLima);
 
         // 3. ✅ FILTRAR PEDIDOS DE LA SEMANA ESPECÍFICA
-        List<Pedido> todosPedidos =pedidoRepository.findAll();
-        List<Pedido> pedidosSemana = new ArrayList<>();
+        // ✅ REEMPLAZAR POR:
+        List<Pedido> pedidosSemana = pedidoRepository.findPedidosByWeek(
+                mesInicio,
+                diaInicio,
+                mesFin,
+                diaFin
+        );
 
-        for (Pedido pedido : todosPedidos) {
-            LocalDateTime fechaPedido = pedido.getFechaPedido();
-
-            if (!fechaPedido.isBefore(startTimeLima) && fechaPedido.isBefore(endTime)) {
-                pedidosSemana.add(pedido);
-            }
-        }
-
-        System.out.println("📦 Total pedidos en BD: " + todosPedidos.size());
         System.out.println("📦 Pedidos en esta semana: " + pedidosSemana.size());
 
         if (pedidosSemana.isEmpty()) {

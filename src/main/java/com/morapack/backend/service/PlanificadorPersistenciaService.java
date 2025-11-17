@@ -11,10 +11,12 @@ import com.morapack.backend.entity.RutaAsignada;
 import com.morapack.backend.entity.RutaTramo;
 import com.morapack.backend.repository.RutaAsignadaRepository;
 import com.morapack.backend.repository.RutaTramoRepository;
-import jakarta.transaction.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -37,13 +39,19 @@ public class PlanificadorPersistenciaService {
     private final PedidoRepository pedidoRepo;
     private final RutaAsignadaRepository rutaRepo;
     private final PlanificadorService algoritmo;
+    private final RutaBatchService rutaBatchService;
+    private final JdbcTemplate jdbcTemplate;
 
     public PlanificadorPersistenciaService(PedidoRepository pedidoRepo,
                                            RutaAsignadaRepository rutaRepo,
-                                           PlanificadorService algoritmo) {
+                                           PlanificadorService algoritmo,
+                                           RutaBatchService rutaBatchService,
+                                           JdbcTemplate jdbcTemplate) { // ✅ AGREGAR
         this.pedidoRepo = pedidoRepo;
         this.rutaRepo = rutaRepo;
         this.algoritmo = algoritmo;
+        this.rutaBatchService = rutaBatchService;
+        this.jdbcTemplate = jdbcTemplate; // ✅ AGREGAR
     }
 
     @Transactional
@@ -52,11 +60,10 @@ public class PlanificadorPersistenciaService {
         // 1) Calcular ventana de búsqueda: 72 horas atrás → ahora
         LocalDateTime ahora = LocalDateTime.now();
 
-        // ✅ Inicio: hace 72 horas (3 días - plazo máximo de entrega)
-        LocalDateTime rangoInicio = ahora.minusHours(72);
-
-        // ✅ Fin: ahora (hora actual)
+        // ✅ CAMBIO: Ventana de 15 minutos (antes era 72 horas)
+        LocalDateTime rangoInicio = ahora.minusMinutes(15);
         LocalDateTime rangoFin = ahora;
+
 
         System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
         System.out.println("   (Buscando pedidos atrasados y actuales)");
@@ -64,19 +71,14 @@ public class PlanificadorPersistenciaService {
         System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
 
         // 2) Buscar pedidos NO_ASIGNADO en ese rango de 15 minutos
-        List<Pedido> todosPendientes = pedidoRepo.findPendientes();
-
-        int year = ahora.getYear();
-
-        List<Pedido> pendientesRango = todosPendientes.stream()
-                .filter(p -> {
-                    LocalDateTime fechaPedido = p.getFechaPedido();
-                    // Comparar: fechaPedido >= rangoInicio && fechaPedido <= rangoFin
-                    return (fechaPedido.isAfter(rangoInicio) || fechaPedido.isEqual(rangoInicio))
-                            && (fechaPedido.isBefore(rangoFin) || fechaPedido.isEqual(rangoFin));
-                })
-                .collect(Collectors.toList());
-
+        List<Pedido> pendientesRango = pedidoRepo.findNoAsignadosEnRango(
+                rangoInicio.getYear(),
+                rangoInicio.getMonthValue(),
+                rangoInicio.getDayOfMonth(),
+                rangoFin.getYear(),
+                rangoFin.getMonthValue(),
+                rangoFin.getDayOfMonth()
+        );
         if (pendientesRango.isEmpty()) {
             return "Sin pedidos NO_ASIGNADO en rango " + rangoInicio.toLocalTime() + " - " + rangoFin.toLocalTime();
         }
@@ -90,8 +92,9 @@ public class PlanificadorPersistenciaService {
         }
 
         int asignados = 0;
+        List<RutaAsignada> rutasParaGuardar = new ArrayList<>(); // ← AGREGAR ESTA LÍNEA
 
-        // 4) Persistir cada ruta propuesta
+        // 4) Preparar rutas (sin guardar aún)
         for (Ruta rutaAlg : solucion.getRutas()) {
             if (rutaAlg == null || rutaAlg.getPedido() == null) continue;
 
@@ -126,23 +129,31 @@ public class PlanificadorPersistenciaService {
                     t.setOrigen(sane(v.getAeropuertoOrigen().getCodigo()));
                     t.setDestino(sane(v.getAeropuertoDestino().getCodigo()));
 
-                    String horaSalidaStr = toHHmm(v.getHoraSalida());
-                    String horaLlegadaStr = toHHmm(v.getHoraLlegada());
+                    // ===== CONVERTIR HORAS LOCALES A HORA DE LIMA (UTC-5) =====
+                    int husoOrigen = v.getAeropuertoOrigen().getHusoHorario();
+                    int husoDestino = v.getAeropuertoDestino().getHusoHorario();
+
+                    // Las horas del vuelo están en hora LOCAL de cada aeropuerto
+                    LocalDateTime horaSalidaLocal = v.getHoraSalida();
+                    LocalDateTime horaLlegadaLocal = v.getHoraLlegada();
+
+                    // Paso 1: Convertir a UTC
+                    LocalDateTime horaSalidaUTC = convertirAUTC(horaSalidaLocal, husoOrigen);
+                    LocalDateTime horaLlegadaUTC = convertirAUTC(horaLlegadaLocal, husoDestino);
+
+                    // Paso 2: Convertir de UTC a hora de Lima
+                    LocalDateTime horaSalidaLima = convertirAHoraLima(horaSalidaUTC);
+                    LocalDateTime horaLlegadaLima = convertirAHoraLima(horaLlegadaUTC);
+                    // ===========================================================
+
+                    String horaSalidaStr = toHHmm(horaSalidaLima);
+                    String horaLlegadaStr = toHHmm(horaLlegadaLima);
 
                     t.setHoraSalida(horaSalidaStr);
                     t.setHoraLlegada(horaLlegadaStr);
 
-                    // ✅ CALCULAR FECHA DEL VUELO
-                    LocalTime horaSalida = LocalTime.parse(horaSalidaStr);
-                    LocalDateTime fechaHoraPedido = LocalDateTime.of(fechaActual, LocalTime.of(pedido.getHora(), pedido.getMinuto()));
-                    LocalDateTime fechaHoraSalida = LocalDateTime.of(fechaActual, horaSalida);
-
-                    // Si el vuelo sale antes que la hora del pedido, es al día siguiente
-                    if (fechaHoraSalida.isBefore(fechaHoraPedido)) {
-                        fechaActual = fechaActual.plusDays(1);
-                    }
-
-                    t.setFecha(fechaActual);
+                    // ✅ USAR LA FECHA REAL DEL VUELO (ya viene convertida a Lima)
+                    t.setFecha(horaSalidaLima.toLocalDate());
 
                     // Para el siguiente tramo, la fecha base es el día de llegada del vuelo actual
                     // (asumimos que puede conectar el mismo día o siguiente)
@@ -151,17 +162,58 @@ public class PlanificadorPersistenciaService {
                 }
             }
 
-            // Guardar cabecera + tramos
-            rutaRepo.save(cab);
 
-            // ✅ Marcar pedido como ASIGNADO e inicializar tramoActual
+            rutasParaGuardar.add(cab);
+
+            // Marcar pedido como ASIGNADO (ya no lo guardamos aquí)
             pedido.setEstado(EstadoPedido.ASIGNADO);
             pedido.setTramoActual(0);
-            pedidoRepo.save(pedido);
 
             asignados++;
         }
 
+        // ✅ GUARDAR TODAS LAS RUTAS EN LOTE
+        if (!rutasParaGuardar.isEmpty()) {
+            rutaBatchService.guardarRutasEnLote(rutasParaGuardar);
+        }
+
+        // ✅ ACTUALIZAR ESTADOS DE PEDIDOS EN LOTE
+        List<Pedido> pedidosActualizar = new ArrayList<>();
+        for (RutaAsignada ruta : rutasParaGuardar) {
+            pedidoRepo.findById(ruta.getPedidoId()).ifPresent(pedido -> {
+                pedido.setEstado(EstadoPedido.ASIGNADO);
+                pedido.setTramoActual(0);
+                pedidosActualizar.add(pedido);
+            });
+        }
+
+        if (!rutasParaGuardar.isEmpty()) {
+            // Construir un solo UPDATE con CASE WHEN
+            StringBuilder sqlUpdate = new StringBuilder("UPDATE pedido SET estado = CASE id ");
+            StringBuilder sqlTramo = new StringBuilder(", tramo_actual = CASE id ");
+            StringBuilder sqlWhere = new StringBuilder(" WHERE id IN (");
+
+            for (int i = 0; i < rutasParaGuardar.size(); i++) {
+                RutaAsignada ruta = rutasParaGuardar.get(i);
+                Long pedidoId = ruta.getPedidoId();
+
+                sqlUpdate.append("WHEN ").append(pedidoId).append(" THEN 'ASIGNADO' ");
+                sqlTramo.append("WHEN ").append(pedidoId).append(" THEN 0 ");
+
+                if (i > 0) sqlWhere.append(", ");
+                sqlWhere.append(pedidoId);
+            }
+
+            sqlUpdate.append("END");
+            sqlTramo.append("END");
+            sqlWhere.append(")");
+
+            String updateFinal = sqlUpdate.toString() + sqlTramo.toString() + sqlWhere.toString();
+
+            jdbcTemplate.update(updateFinal);
+
+            System.out.println("✅ Actualizados " + rutasParaGuardar.size() + " pedidos a ASIGNADO");
+        }
         return "✅ Asignados=" + asignados + " de " + pendientesRango.size() +
                 " (Rango: " + rangoInicio.toLocalTime() + " - " + rangoFin.toLocalTime() + ")";
     }
@@ -194,5 +246,20 @@ public class PlanificadorPersistenciaService {
         } catch (Exception ignore) {
             return null;
         }
+    }
+
+    /**
+     * Convierte una hora local a UTC
+     */
+    private static LocalDateTime convertirAUTC(LocalDateTime fechaLocal, int husoHorario) {
+        return fechaLocal.minusHours(husoHorario);
+    }
+
+    /**
+     * Convierte UTC a hora de Lima (UTC-5)
+     */
+    private static LocalDateTime convertirAHoraLima(LocalDateTime fechaUTC) {
+        final int HUSO_LIMA = -5;
+        return fechaUTC.plusHours(HUSO_LIMA);
     }
 }

@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 @Component
 public class PlanificacionScheduler {
 
@@ -13,14 +15,31 @@ public class PlanificacionScheduler {
 
     private final PlanificadorPersistenciaService persistenciaService;
 
+    // ✅ Evitar ejecuciones concurrentes si una tarda mucho
+    private final AtomicBoolean ejecutando = new AtomicBoolean(false);
+
     public PlanificacionScheduler(PlanificadorPersistenciaService persistenciaService) {
         this.persistenciaService = persistenciaService;
     }
 
-    // corre en el minuto 0, 15, 30, 45 de cada hora; zona Perú
-    @Scheduled(fixedDelay = 30000)
+    @Scheduled(fixedDelay = 30000) // 30 segundos
     public void ejecutarPlanificacionPeriodica() {
-        String resumen = persistenciaService.ejecutarYGuardar();
-        log.info("[Planificador automático] {}", resumen);
+        // ✅ Saltar si aún está ejecutándose la anterior
+        if (!ejecutando.compareAndSet(false, true)) {
+            log.warn("[Planificador] Ejecución anterior aún en curso, saltando...");
+            return;
+        }
+
+        try {
+            long inicio = System.currentTimeMillis();
+            String resumen = persistenciaService.ejecutarYGuardar();
+            long duracion = System.currentTimeMillis() - inicio;
+
+            log.info("[Planificador automático] {} (tardó {}ms)", resumen, duracion);
+        } catch (Exception e) {
+            log.error("[Planificador] Error en ejecución: {}", e.getMessage(), e);
+        } finally {
+            ejecutando.set(false);
+        }
     }
 }
