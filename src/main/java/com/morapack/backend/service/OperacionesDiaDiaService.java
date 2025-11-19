@@ -116,8 +116,8 @@ public class OperacionesDiaDiaService {
             rutasPorPedido.put(ruta.getPedidoId(), ruta);
         }
 
-        // 4. Procesar cada pedido EN PARALELO
-        List<Pedido> pedidosModificados = pedidosActivos.parallelStream()
+        // 4. Procesar cada pedido
+        List<Pedido> pedidosModificados = pedidosActivos.stream()
                 .filter(pedido -> {
                     RutaAsignada ruta = rutasPorPedido.get(pedido.getId());
                     return procesarPedido(pedido, ruta, ahora);
