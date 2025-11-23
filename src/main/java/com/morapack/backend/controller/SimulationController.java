@@ -47,16 +47,13 @@ public class SimulationController {
      * Obtiene el estado actual de la simulación
      */
     @GetMapping("/{id}/status")
-    public ResponseEntity<SimulationStatusResponse> getSimulationStatus(
-            @PathVariable String id) {
+    public ResponseEntity<SimulationStatusResponse> getSimulationStatus(@PathVariable String id) {
         try {
             SimulationStatusResponse response = simulationService.getSimulationStatus(id);
             return ResponseEntity.ok(response);
         } catch (RuntimeException e) {
+            System.err.println("❌ Error: " + e.getMessage());
             return ResponseEntity.notFound().build();
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.internalServerError().build();
         }
     }
 

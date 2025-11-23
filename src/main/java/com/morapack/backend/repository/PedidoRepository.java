@@ -16,11 +16,13 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
      * ✅ OPTIMIZADO: Agregado LIMIT para evitar cargar millones de registros
      */
     @Query("SELECT p FROM Pedido p WHERE " +
+            "p.anho = :anho AND " +
             "(p.mes > :mesInicio OR (p.mes = :mesInicio AND p.dia >= :diaInicio)) AND " +
             "(p.mes < :mesFin OR (p.mes = :mesFin AND p.dia < :diaFin)) " +
             "ORDER BY p.mes, p.dia, p.hora, p.minuto " +
             "LIMIT 70000")
     List<Pedido> findPedidosByWeek(
+            @Param("anho") int anho,
             @Param("mesInicio") int mesInicio,
             @Param("diaInicio") int diaInicio,
             @Param("mesFin") int mesFin,

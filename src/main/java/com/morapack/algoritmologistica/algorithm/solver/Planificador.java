@@ -24,7 +24,7 @@ public class Planificador {
     private double tasaCrossover;
 
     private boolean usarGA;  // Flag para activar/desactivar GA
-
+    private GraspBatchCallback batchCallback;
     // === Constructor ===
     public Planificador(List<Pedido> pedidos, List<Vuelo> vuelos,
                         List<Aeropuerto> aeropuertos, List<Aeropuerto> sedesPrincipales) {
@@ -51,6 +51,10 @@ public class Planificador {
     public void setParametrosGRASP(double alpha, int tamanoRCL) {
         this.alphaGRASP = alpha;
         this.tamanoRCL = tamanoRCL;
+    }
+
+    public void setBatchCallback(GraspBatchCallback callback) {
+        this.batchCallback = callback;
     }
 
     public void setParametrosGA(int tamañoPoblacion, int numeroGeneraciones,
@@ -88,13 +92,19 @@ public class Planificador {
      * Ejecuta solo GRASP (modo actual)
      * @return Mejor solución de GRASP
      */
-    private Solucion ejecutarSoloGRASP(int year) {  // ← NUEVO parámetro
+    private Solucion ejecutarSoloGRASP(int year) {
         System.out.println("--- Ejecutando GRASP ---");
 
         GRASP grasp = new GRASP(pedidos, vuelos, aeropuertos, sedesPrincipales,
                 alphaGRASP, tamanoRCL);
 
-        Solucion solucion = grasp.generarSolucion(year);  // ← Pasar año
+        // Pasar callback si existe
+        if (batchCallback != null) {
+            grasp.setBatchCallback(batchCallback);
+            grasp.setBatchSize(3000);
+        }
+
+        Solucion solucion = grasp.generarSolucion(year);
 
         System.out.println("\n--- Solución GRASP generada ---");
         mostrarResumenSolucion(solucion);

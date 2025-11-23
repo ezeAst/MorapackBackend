@@ -18,6 +18,8 @@ public class GRASP {
     private double alpha;                             // Parámetro de aleatorización (0.0 a 1.0)
     private int tamanoRCL;                           // Tamaño de la Lista de Candidatos Restringida
     private Map<String, List<Vuelo>> cacheRutasGlobal;
+    private GraspBatchCallback batchCallback;
+    private int batchSize = 3000;
 
     private Map<String, List<Vuelo>> vuelosPorOrigen;
     // === Constructores ===
@@ -45,6 +47,14 @@ public class GRASP {
     }
 
     // === Getters y Setters ===
+    public void setBatchCallback(GraspBatchCallback callback) {
+        this.batchCallback = callback;
+    }
+
+    public void setBatchSize(int size) {
+        this.batchSize = size;
+    }
+
     public List<Pedido> getPedidos() {
         return pedidos;
     }
@@ -99,9 +109,11 @@ public class GRASP {
      * Genera una solución usando GRASP.
      * @return Una solución construida de manera greedy con aleatorización
      */
-    public Solucion generarSolucion(int year) { // ← NUEVO parámetro
+    public Solucion generarSolucion(int year) {
         long startTime = System.currentTimeMillis();
         Solucion solucion = new Solucion();
+        int contadorPedidos = 0;
+        int ultimoIndicePersistido = 0;
 
         for (Pedido pedido : pedidos) {
             int cantidadRestante = pedido.getCantidad();
@@ -118,7 +130,6 @@ public class GRASP {
 
                 List<OpcionSede> opciones = new ArrayList<>();
 
-                // ✅ CONSTRUIR FECHA USANDO EL AÑO PASADO
                 LocalDateTime fechaPedido = pedido.getFechaPedido();
 
                 for (Aeropuerto sede : sedesPrincipales) {
@@ -185,6 +196,21 @@ public class GRASP {
                         " NO completado. Quedan " + cantidadRestante +
                         " productos sin asignar después de " + intentos + " intentos.");
             }
+
+            contadorPedidos++;
+
+            // Checkpoint cada batchSize pedidos
+            if (batchCallback != null && contadorPedidos % batchSize == 0) {
+                List<Ruta> rutasNuevas = solucion.getRutas().subList(ultimoIndicePersistido, solucion.getRutas().size());
+                batchCallback.onBatchComplete(new ArrayList<>(rutasNuevas), contadorPedidos, pedidos.size());
+                ultimoIndicePersistido = solucion.getRutas().size();
+            }
+        }
+
+        // Persistir rutas finales (último batch incompleto)
+        if (batchCallback != null && ultimoIndicePersistido < solucion.getRutas().size()) {
+            List<Ruta> rutasFinales = solucion.getRutas().subList(ultimoIndicePersistido, solucion.getRutas().size());
+            batchCallback.onBatchComplete(new ArrayList<>(rutasFinales), contadorPedidos, pedidos.size());
         }
 
         solucion.evaluarSolucion(pedidos, vuelos, aeropuertos);

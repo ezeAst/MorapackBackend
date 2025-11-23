@@ -1,6 +1,7 @@
 package com.morapack.backend.service;
 
 import com.morapack.algoritmologistica.algorithm.models.*;
+import com.morapack.algoritmologistica.algorithm.solver.GraspBatchCallback;
 import com.morapack.algoritmologistica.algorithm.solver.Planificador;
 import com.morapack.algoritmologistica.algorithm.solver.Solucion;
 import com.morapack.algoritmologistica.algorithm.util.LectorCSV;
@@ -14,11 +15,16 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class SimulationService {
 
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+    private volatile boolean planificacionEnProgreso = false;
     private final SimulationEngine simulationEngine;
     private final PedidoRepository pedidoRepository;
 
@@ -38,7 +44,10 @@ public class SimulationService {
     private final Map<String, List<OrderSnapshot>> simulationOrders = new ConcurrentHashMap<>();
     private final Map<String, List<OrderSnapshot>> deliveredOrders = new ConcurrentHashMap<>();
     private final Map<String, Long> lastUpdateSeconds = new ConcurrentHashMap<>();
+    private final Map<String, Integer> simulationProcessedOrders = new ConcurrentHashMap<>();
 
+    // Junto con los otros Maps
+    private final Map<String, Boolean> simulationPlanningStatus = new ConcurrentHashMap<>();
     // ✅ CONSTRUCTOR - Actualizar este también
     public SimulationService(SimulationEngine simulationEngine,
                              PedidoRepository pedidoRepository) {  // ← Agregar parámetro
@@ -58,7 +67,7 @@ public class SimulationService {
         LocalDateTime startTimeLima = request.getStartTime();
         LocalDateTime endTime = startTimeLima.plusWeeks(1);
 
-        int year = startTimeLima.getYear();
+        int anho = startTimeLima.getYear();
         int mesInicio = startTimeLima.getMonthValue();
         int diaInicio = startTimeLima.getDayOfMonth();
         int mesFin = endTime.getMonthValue();
@@ -73,12 +82,12 @@ public class SimulationService {
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
 
-        // 2. ✅ GENERAR VUELOS PARA LA SEMANA ESPECÍFICA
+        // 2. Generar vuelos para la semana específica
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTimeLima);
 
-        // 3. ✅ FILTRAR PEDIDOS DE LA SEMANA ESPECÍFICA
-        // ✅ REEMPLAZAR POR:
+        // 3. Filtrar pedidos de la semana específica
         List<Pedido> pedidosSemana = pedidoRepository.findPedidosByWeek(
+                anho,
                 mesInicio,
                 diaInicio,
                 mesFin,
@@ -91,93 +100,190 @@ public class SimulationService {
             throw new RuntimeException("❌ No hay pedidos para la semana especificada");
         }
 
-        // 4. Ejecutar GRASP
+        // 4. Crear simulación E INICIAR
+        Simulation simulation = new Simulation();
+        simulation.setType(request.getType());
+        simulation.setStartTime(startTimeLima);
+        simulation.start(); // ← Iniciar INMEDIATAMENTE
+        String simulationId = simulation.getId();
+
+        // 5. Inicializar estructuras vacías
+        activeSimulations.put(simulationId, simulation);
+        System.out.println("✅ Simulación guardada en Map con ID: " + simulationId);
+        System.out.println("✅ activeSimulations contiene: " + activeSimulations.keySet());
+        simulationAeropuertos.put(simulationId, aeropuertos);
+        simulationFlights.put(simulationId, new ArrayList<>());
+        simulationOrders.put(simulationId, new ArrayList<>());
+        deliveredOrders.put(simulationId, new ArrayList<>());
+        lastUpdateSeconds.put(simulationId, 0L);
+        simulationProcessedOrders.put(simulationId, 0);
+
+        // 6. Inicializar engine
+        simulationEngine.initializeCoordinatesCache(aeropuertos);
+
+        // 7. Configurar Planificador
         Planificador planificador = new Planificador(pedidosSemana, vuelos, aeropuertos, sedesPrincipales);
 
         if (request.getAlphaGrasp() != null && request.getTamanoRcl() != null) {
             planificador.setParametrosGRASP(request.getAlphaGrasp(), request.getTamanoRcl());
         }
 
-        Solucion solucion = planificador.ejecutarPlanificacion(year);  // ← Pasar año
+        // 8. Configurar callback para procesamiento incremental
+        GraspBatchCallback callback = (rutasBatch, pedidosProcesados, totalPedidos) -> {
+            System.out.println("📦 Batch completado: " + pedidosProcesados + "/" + totalPedidos);
+            procesarRutasBatch(simulationId, rutasBatch, startTimeLima);
+        };
 
-        System.out.println("✅ Solución GRASP generada - Fitness: " + solucion.getFitness());
+        planificador.setBatchCallback(callback);
 
-        // 5. Crear simulación
-        Simulation simulation = new Simulation();
-        simulation.setType(request.getType());
-        simulation.setStartTime(startTimeLima);
-        simulation.setSolucion(solucion);
+        // 9. Ejecutar planificación en background
+        simulationPlanningStatus.put(simulationId, true);
+        CompletableFuture.runAsync(() -> {
+            try {
+                Solucion solucion = planificador.ejecutarPlanificacion(anho);
+                simulation.setSolucion(solucion);
+                // NO llamar a simulation.start() aquí - ya está corriendo
+                simulationPlanningStatus.put(simulationId, false);
+                System.out.println("✅ Planificación completa - Fitness: " + solucion.getFitness());
+            } catch (Exception e) {
+                simulationPlanningStatus.put(simulationId, false);
+                System.err.println("❌ Error en planificación: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }, executorService);
 
-        // 6. Inicializar engine
-        simulationEngine.initializeCoordinatesCache(aeropuertos);
-
-        // 7. Generar snapshots
-        List<FlightSnapshot> flights = simulationEngine.generateInitialFlightSnapshots(
-                solucion,
-                startTimeLima
-        );
-        List<WarehouseSnapshot> warehouses = simulationEngine.generateWarehouseSnapshots(
-                aeropuertos,
-                0,
-                startTimeLima
-        );
-
-        // 6. Inicializar pedidos
-        List<OrderSnapshot> orderSnapshots = pedidosSemana.stream()
-            .map(pedido -> {
-                OrderSnapshot snapshot = new OrderSnapshot();
-                snapshot.setOrderId(pedido.getIdCliente()); // Usamos el ID del cliente como ID del pedido por ahora
-                snapshot.setDestinationAirport(pedido.getAeropuertoDestino());
-                snapshot.setStatus("pending");
-                snapshot.setClientId(pedido.getIdCliente());
-                snapshot.setDay(pedido.getDia());
-                snapshot.setHour(pedido.getHora());
-                snapshot.setMinute(pedido.getMinuto());
-                snapshot.setProgressPercentage(0.0);
-                return snapshot;
-            })
-            .toList();
-
-        // 7. Guardar en memoria
-        activeSimulations.put(simulation.getId(), simulation);
-        simulationFlights.put(simulation.getId(), flights);
-        simulationAeropuertos.put(simulation.getId(), aeropuertos);
-        simulationOrders.put(simulation.getId(), new ArrayList<>(orderSnapshots));
-        deliveredOrders.put(simulation.getId(), new ArrayList<>());
-        lastUpdateSeconds.put(simulation.getId(), 0L);
-
-        System.out.println("✅ Simulación creada con ID: " + simulation.getId());
-        System.out.println("🛫 Vuelos totales: " + flights.size());
-        System.out.println("🏢 Almacenes: " + warehouses.size());
-
-        // 9. Crear respuesta
+        // 10. Crear respuesta inmediata
         SimulationResponse response = new SimulationResponse();
-        response.setSimulationId(simulation.getId());
-        response.setStatus("running");
-        response.setMessage("Simulación iniciada correctamente");
-        response.setFlights(flights);
-        response.setWarehouses(warehouses);
+        response.setSimulationId(simulationId);
+        response.setStatus("PLANNING_IN_PROGRESS");
+        response.setMessage("Planificación iniciada. Los vuelos aparecerán progresivamente.");
+        response.setFlights(new ArrayList<>());
+        response.setWarehouses(simulationEngine.generateWarehouseSnapshots(aeropuertos, 0, startTimeLima));
         response.setTotalOrders(pedidosSemana.size());
-        response.setTotalFlights(flights.size());
-        response.setTotalPackages(flights.stream().mapToInt(FlightSnapshot::getPackages).sum());
+        response.setTotalFlights(0);
+        response.setTotalPackages(0);
         response.setEstimatedDurationSeconds(90 * 60);
 
+
         return response;
+    }
+
+    // Nuevo método para procesar batches incrementales
+    private void procesarRutasBatch(String simulationId, List<Ruta> rutasBatch, LocalDateTime startTime) {
+        // Contar pedidos únicos en este batch
+        Set<String> pedidosUnicos = new HashSet<>();
+        for (Ruta ruta : rutasBatch) {
+            pedidosUnicos.add(ruta.getPedido().getIdCliente());
+        }
+
+        // Actualizar contador
+        int currentCount = simulationProcessedOrders.getOrDefault(simulationId, 0);
+        simulationProcessedOrders.put(simulationId, currentCount + pedidosUnicos.size());
+
+        // Generar snapshots de vuelos del batch
+        Solucion solucionParcial = new Solucion(rutasBatch);
+        List<FlightSnapshot> nuevosVuelos = simulationEngine.generateInitialFlightSnapshots(
+                solucionParcial,
+                startTime
+        );
+
+        // Agregar solo vuelos que no existen ya
+        List<FlightSnapshot> vuelosActuales = simulationFlights.get(simulationId);
+        Set<String> vuelosExistentes = new HashSet<>();
+
+        // Crear Set con IDs únicos basados en origen-destino-fecha-hora
+        for (FlightSnapshot existing : vuelosActuales) {
+            String key = existing.getOrigin() + "-" + existing.getDestination() + "-" +
+                    existing.getDepartureTime().toString();
+            vuelosExistentes.add(key);
+        }
+
+        int agregados = 0;
+        for (FlightSnapshot nuevoVuelo : nuevosVuelos) {
+            String key = nuevoVuelo.getOrigin() + "-" + nuevoVuelo.getDestination() + "-" +
+                    nuevoVuelo.getDepartureTime().toString();
+
+            if (!vuelosExistentes.contains(key)) {
+                vuelosActuales.add(nuevoVuelo);
+                vuelosExistentes.add(key);
+                agregados++;
+            }
+        }
     }
 
     /**
      * Obtiene el estado actual de una simulación
      */
     public SimulationStatusResponse getSimulationStatus(String simulationId) {
+
+
         Simulation simulation = activeSimulations.get(simulationId);
         if (simulation == null) {
             throw new RuntimeException("Simulación no encontrada: " + simulationId);
+        }
+
+        // Determinar estado actual
+        Boolean isPlanning = simulationPlanningStatus.getOrDefault(simulationId, false);
+        String currentStatus;
+        if (isPlanning) {
+            currentStatus = "PLANNING_IN_PROGRESS"; // Pero la simulación sigue RUNNING
+        } else {
+            currentStatus = simulation.getStatus().name();
+        }
+
+        // Si está en planificación, devolver respuesta básica
+        if (isPlanning || simulation.getSolucion() == null) {
+            List<FlightSnapshot> allFlights = simulationFlights.getOrDefault(simulationId, new ArrayList<>());
+
+            // ✅ ACTUALIZAR estados de vuelos aunque esté en planificación
+            long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
+            List<FlightSnapshot> activeFlights = simulationEngine.updateFlightStates(
+                    allFlights, currentSeconds, simulation.getStartTime()
+            );
+
+            SimulationStatusResponse response = new SimulationStatusResponse();
+            response.setElapsedSeconds(currentSeconds);
+            response.setProgressPercentage(0.0);
+            response.setStatus(currentStatus);
+            response.setCurrentDay(simulation.getStartTime().plusSeconds(currentSeconds).getDayOfMonth());
+            response.setCurrentHour(simulation.getStartTime().plusSeconds(currentSeconds).getHour());
+            response.setCurrentMinute(simulation.getStartTime().plusSeconds(currentSeconds).getMinute());
+            response.setActiveFlights(activeFlights); // ✅ Vuelos con estado actualizado
+            response.setWarehouses(simulationEngine.generateWarehouseSnapshots(
+                    simulationAeropuertos.get(simulationId), currentSeconds, simulation.getStartTime()
+            ));
+            response.setActiveOrders(new ArrayList<>());
+            response.setRecentlyDeliveredOrders(new ArrayList<>());
+            SimulationMetrics metrics = new SimulationMetrics();
+            int flightsCompleted = (int) allFlights.stream()
+                    .filter(f -> "landed".equals(f.getStatus()))
+                    .count();
+
+            int totalPackages = allFlights.stream().mapToInt(FlightSnapshot::getPackages).sum();
+            int deliveredPackages = allFlights.stream()
+                    .filter(f -> "landed".equals(f.getStatus()))
+                    .mapToInt(FlightSnapshot::getPackages)
+                    .sum();
+
+            metrics.setFlightsCompleted(flightsCompleted);
+            metrics.setPackagesDelivered(deliveredPackages);
+            metrics.setPackagesPending(totalPackages - deliveredPackages);
+            metrics.setOrdersProcessed(simulationProcessedOrders.getOrDefault(simulationId, 0));
+            metrics.setWarehouseViolations(0);
+            metrics.setFlightViolations(0);
+            metrics.updateSuccessRate();
+
+            response.setMetrics(metrics);
+            response.setRecentEvents(new ArrayList<>());
+            response.setCurrentDateTime(simulation.getStartTime().plusSeconds(currentSeconds).toString());
+            return response;
         }
 
         // Verificar si completó
         if (simulation.isCompleted() && simulation.getStatus() != SimulationStatus.COMPLETED) {
             simulation.complete();
         }
+
 
         long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
         long previousSeconds = lastUpdateSeconds.get(simulationId);
@@ -217,18 +323,19 @@ public class SimulationService {
         int currentMinute = currentSimulatedTime.getMinute();
 
         // Actualizar estado de los pedidos
-        // Actualizar estado de los pedidos
         List<OrderSnapshot> orders = simulationOrders.get(simulationId);
         List<OrderSnapshot> delivered = deliveredOrders.get(simulationId);
 
         // Actualizar estado de pedidos + emitir eventos
         updateOrderStates(simulationId, simulation, orders, delivered, simulation.getSolucion(), currentSimulatedTime);
 
+        // Determinar estado actual
+
         // Crear respuesta
         SimulationStatusResponse response = new SimulationStatusResponse();
         response.setElapsedSeconds(currentSeconds);
         response.setProgressPercentage(simulation.calculateProgress());
-        response.setStatus(simulation.getStatus().name());
+        response.setStatus(currentStatus);
         response.setCurrentDay(currentDay);
         response.setCurrentHour(currentHour);
         response.setCurrentMinute(currentMinute);
