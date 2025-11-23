@@ -54,7 +54,10 @@ public class SimulationEngine {
         int flightIdCounter = 1;
         for (Vuelo vuelo : vuelosUnicos) {
             FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime);
-            snapshots.add(snapshot);
+            // ✅ Solo incluir vuelos que salen después del startTime
+            if (!snapshot.getDepartureTime().isBefore(startTime)) {
+                snapshots.add(snapshot);
+            }
         }
 
         return snapshots;

@@ -39,10 +39,10 @@ public class Simulation {
     public Simulation() {
         this.id = UUID.randomUUID().toString();
         this.createdAt = LocalDateTime.now();
-        this.status = SimulationStatus.RUNNING;
+        this.status = SimulationStatus.STOPPED; // ← Cambiar de RUNNING a STOPPED
         this.events = new ArrayList<>();
         this.metrics = new SimulationMetrics();
-        this.simulationStartMillis = System.currentTimeMillis();
+        this.simulationStartMillis = 0; // ← Inicializar en 0
         this.elapsedSimulatedSeconds = 0;
         this.pausedDurationMillis = 0;
     }
@@ -50,6 +50,15 @@ public class Simulation {
     /**
      * Calcula el tiempo simulado transcurrido
      */
+
+    public void start() {
+        if (status == SimulationStatus.STOPPED) {
+            this.simulationStartMillis = System.currentTimeMillis();
+            this.status = SimulationStatus.RUNNING;
+        }
+    }
+
+
     public long calculateElapsedSimulatedSeconds() {
         if (status == SimulationStatus.PAUSED) {
             return elapsedSimulatedSeconds;
