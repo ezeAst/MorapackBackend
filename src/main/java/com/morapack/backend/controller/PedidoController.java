@@ -36,6 +36,30 @@ public class PedidoController {
         return pedidoRepository.findAll();
     }
 
+    /**
+     * GET /api/pedidos/almacen/{codigo}
+     * Lista pedidos que están actualmente en un almacén específico
+     */
+    @GetMapping("/almacen/{codigo}")
+    public ResponseEntity<List<Map<String, Object>>> listarPorAlmacen(@PathVariable String codigo) {
+        List<Pedido> pedidos = pedidoRepository.findPedidosEnAlmacen(codigo);
+        
+        List<Map<String, Object>> response = pedidos.stream()
+                .map(p -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("aeropuertoDestino", p.getAeropuertoDestino());
+                    map.put("cantidad", p.getCantidad());
+                    map.put("estado", p.getEstado().toString());
+                    map.put("tramoActual", p.getTramoActual());
+                    map.put("fecha", String.format("%04d-%02d-%02d", p.getAnho(), p.getMes(), p.getDia()));
+                    return map;
+                })
+                .toList();
+        
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping
     public ResponseEntity<Pedido> crear(@RequestBody Pedido body) {
         // ignoramos cualquier id que llegue del front

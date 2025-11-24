@@ -133,6 +133,26 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     List<Object[]> countByEstadoGrouped();
 
     /**
+     * ✅ NUEVO: Buscar pedidos que están en un almacén específico (solo operaciones día a día)
+     * Un pedido está en almacén cuando:
+     * - Estado = EN_ALMACEN_INTERMEDIO (parte de operaciones día a día)
+     * - El destino del tramo ANTERIOR (tramo_actual - 1) es el código del almacén
+     * - Tiene ruta asignada (operaciones día a día)
+     * Nota: tramo_actual apunta al SIGUIENTE vuelo, no al actual
+     * Excluye: NO_ASIGNADO, ENTREGADO, RECOGIDO (no están en operaciones activas)
+     */
+    @Query(value = """
+    SELECT DISTINCT p.* FROM pedido p
+    INNER JOIN rutas_asignadas ra ON p.id = ra.pedido_id
+    INNER JOIN rutas_tramo rt ON ra.id = rt.ruta_id AND rt.orden = p.tramo_actual - 1
+    WHERE p.estado = 'EN_ALMACEN_INTERMEDIO'
+    AND rt.destino = :codigoAlmacen
+    ORDER BY p.id DESC
+    LIMIT 10000
+    """, nativeQuery = true)
+    List<Pedido> findPedidosEnAlmacen(@Param("codigoAlmacen") String codigoAlmacen);
+
+    /**
      * ✅ OPTIMIZACIÓN: Buscar pedidos EN_TRANSITO con JOIN de rutas (evita N+1)
      */
     @Query(value = """
@@ -155,5 +175,30 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     List<Pedido> findEnTransitoConVuelosActivos(
             @Param("fecha") String fecha,
             @Param("horaActual") String horaActual
+    );
+
+    /**
+     * ✅ NUEVO: Buscar pedidos que están en un vuelo específico
+     * Un pedido está en un vuelo cuando:
+     * - Estado = EN_TRANSITO
+     * - El tramo actual coincide con origen, destino, fecha y hora del vuelo
+     */
+    @Query(value = """
+    SELECT DISTINCT p.* FROM pedido p
+    INNER JOIN rutas_asignadas ra ON p.id = ra.pedido_id
+    INNER JOIN rutas_tramo rt ON ra.id = rt.ruta_id AND rt.orden = p.tramo_actual
+    WHERE p.estado = 'EN_TRANSITO'
+    AND rt.origen = :origen
+    AND rt.destino = :destino
+    AND rt.fecha = :fecha
+    AND rt.hora_salida = :hora
+    ORDER BY p.id DESC
+    LIMIT 10000
+    """, nativeQuery = true)
+    List<Pedido> findPedidosEnVuelo(
+            @Param("origen") String origen,
+            @Param("destino") String destino,
+            @Param("fecha") String fecha,
+            @Param("hora") String hora
     );
 }

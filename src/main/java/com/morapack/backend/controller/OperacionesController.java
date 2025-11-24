@@ -138,6 +138,37 @@ public class OperacionesController {
         return ResponseEntity.ok(vuelos);
     }
 
+    /**
+     * GET /api/operaciones/vuelos/{origen}/{destino}/{fecha}/{hora}/pedidos
+     * Lista los pedidos que van en un vuelo específico
+     * Ejemplo: /api/operaciones/vuelos/JFK/MAD/2025-01-15/14:30/pedidos
+     */
+    @GetMapping("/vuelos/{origen}/{destino}/{fecha}/{hora}/pedidos")
+    public ResponseEntity<List<Map<String, Object>>> listarPedidosEnVuelo(
+            @PathVariable String origen,
+            @PathVariable String destino,
+            @PathVariable String fecha,
+            @PathVariable String hora) {
+
+        List<Pedido> pedidos = pedidoRepository.findPedidosEnVuelo(origen, destino, fecha, hora);
+
+        List<Map<String, Object>> response = pedidos.stream()
+                .map(p -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("aeropuertoDestino", p.getAeropuertoDestino());
+                    map.put("cantidad", p.getCantidad());
+                    map.put("estado", p.getEstado().toString());
+                    map.put("tramoActual", p.getTramoActual());
+                    map.put("fecha", String.format("%04d-%02d-%02d", p.getAnho(), p.getMes(), p.getDia()));
+                    map.put("idCliente", p.getIdCliente());
+                    return map;
+                })
+                .toList();
+
+        return ResponseEntity.ok(response);
+    }
+
     // ========== MÉTODOS AUXILIARES ==========
 
     private List<Map<String, Object>> obtenerVuelosActivos(LocalDateTime ahora) {
@@ -279,6 +310,7 @@ public class OperacionesController {
                 case EN_TRANSITO -> enTransito = count;
                 case EN_ALMACEN_INTERMEDIO -> enAlmacen = count;
                 case ENTREGADO -> entregados = count;
+                case RECOGIDO -> {} // Estado de limpieza, no contabilizar
             }
         }
 
