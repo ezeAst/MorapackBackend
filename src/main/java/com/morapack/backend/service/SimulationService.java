@@ -235,7 +235,7 @@ public class SimulationService {
         if (isPlanning || simulation.getSolucion() == null) {
             List<FlightSnapshot> allFlights = simulationFlights.getOrDefault(simulationId, new ArrayList<>());
 
-            // ✅ ACTUALIZAR estados de vuelos aunque esté en planificación
+
             long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
             List<FlightSnapshot> activeFlights = simulationEngine.updateFlightStates(
                     allFlights, currentSeconds, simulation.getStartTime()
@@ -248,7 +248,7 @@ public class SimulationService {
             response.setCurrentDay(simulation.getStartTime().plusSeconds(currentSeconds).getDayOfMonth());
             response.setCurrentHour(simulation.getStartTime().plusSeconds(currentSeconds).getHour());
             response.setCurrentMinute(simulation.getStartTime().plusSeconds(currentSeconds).getMinute());
-            response.setActiveFlights(activeFlights); // ✅ Vuelos con estado actualizado
+            response.setActiveFlights(activeFlights);
             response.setWarehouses(simulationEngine.generateWarehouseSnapshots(
                     simulationAeropuertos.get(simulationId), currentSeconds, simulation.getStartTime()
             ));

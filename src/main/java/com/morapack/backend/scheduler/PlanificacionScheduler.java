@@ -15,7 +15,7 @@ public class PlanificacionScheduler {
 
     private final PlanificadorPersistenciaService persistenciaService;
 
-    // ✅ Evitar ejecuciones concurrentes si una tarda mucho
+
     private final AtomicBoolean ejecutando = new AtomicBoolean(false);
 
     public PlanificacionScheduler(PlanificadorPersistenciaService persistenciaService) {
@@ -24,7 +24,7 @@ public class PlanificacionScheduler {
 
     @Scheduled(fixedDelay = 30000) // 30 segundos
     public void ejecutarPlanificacionPeriodica() {
-        // ✅ Saltar si aún está ejecutándose la anterior
+
         if (!ejecutando.compareAndSet(false, true)) {
             log.warn("[Planificador] Ejecución anterior aún en curso, saltando...");
             return;

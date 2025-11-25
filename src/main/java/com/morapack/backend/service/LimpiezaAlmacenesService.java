@@ -71,7 +71,7 @@ public class LimpiezaAlmacenesService {
                     aeropuerto.setCapacidadActual(nuevaCapacidad);
                     aeropuertoRepository.save(aeropuerto);
 
-                    // ✅ CAMBIAR ESTADO A RECOGIDO (para no volver a procesarlo)
+
                     pedido.setEstado(EstadoPedido.RECOGIDO);
                     pedidoRepository.save(pedido);
 

@@ -36,11 +36,11 @@ public class OperacionesDiaDiaService {
     public OperacionesDiaDiaService(PedidoRepository pedidoRepository,
                                     RutaAsignadaRepository rutaAsignadaRepository,
                                     AeropuertoRepository aeropuertoRepository,
-                                    JdbcTemplate jdbcTemplate) { // ✅ AGREGAR
+                                    JdbcTemplate jdbcTemplate) {
         this.pedidoRepository = pedidoRepository;
         this.rutaAsignadaRepository = rutaAsignadaRepository;
         this.aeropuertoRepository = aeropuertoRepository;
-        this.jdbcTemplate = jdbcTemplate; // ✅ AGREGAR
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /**
@@ -74,7 +74,7 @@ public class OperacionesDiaDiaService {
         LocalDateTime ahora = LocalDateTime.now();
         LocalDateTime limite = ahora.plusHours(2);
 
-        // ✅ CAMBIO CRÍTICO: Solo buscar pedidos con vuelos en próximas 2 horas
+
         String fechaStr = ahora.toLocalDate().toString();
         String fechaMananaStr = limite.toLocalDate().toString(); // Puede ser hoy o mañana
         String horaActualStr = ahora.toLocalTime().toString().substring(0, 5);
@@ -124,11 +124,11 @@ public class OperacionesDiaDiaService {
                 })
                 .collect(Collectors.toList());
 
-        // 5. ✅ GUARDAR TODOS AL FINAL
+
         if (!pedidosModificados.isEmpty()) {
             System.out.println("💾 Guardando " + pedidosModificados.size() + " pedidos modificados");
 
-            // ✅ OPCIÓN OPTIMIZADA: Batch update con JDBC
+
             actualizarPedidosEnLote(pedidosModificados);
         }
     }

@@ -189,7 +189,7 @@ public class OperacionesController {
         Map<Long, RutaAsignada> rutasPorPedido = todasLasRutas.stream()
                 .collect(Collectors.toMap(RutaAsignada::getPedidoId, r -> r));
 
-        // ✅ AGRUPAR POR VUELO: origen-destino-fecha-hora
+
         Map<String, List<Pedido>> pedidosPorVuelo = new HashMap<>();
         Map<String, RutaTramo> tramoPorVuelo = new HashMap<>();
 
@@ -210,7 +210,7 @@ public class OperacionesController {
             tramoPorVuelo.putIfAbsent(vueloKey, tramo);
         }
 
-        // ✅ CREAR UN SOLO OBJETO POR VUELO
+
         for (Map.Entry<String, List<Pedido>> entry : pedidosPorVuelo.entrySet()) {
             String vueloKey = entry.getKey();
             List<Pedido> pedidosDelVuelo = entry.getValue();
@@ -234,7 +234,7 @@ public class OperacionesController {
             double currentLat = origen.getLat() + (destino.getLat() - origen.getLat()) * progress;
             double currentLng = origen.getLon() + (destino.getLon() - origen.getLon()) * progress;
 
-            // ✅ SUMAR PAQUETES DE TODOS LOS PEDIDOS EN ESTE VUELO
+
             int totalPaquetes = pedidosDelVuelo.stream().mapToInt(Pedido::getCantidad).sum();
 
             Map<String, Object> vuelo = new HashMap<>();
@@ -295,7 +295,7 @@ public class OperacionesController {
     private Map<String, Object> calcularMetricas() {
         Map<String, Object> metricas = new HashMap<>();
 
-        // ✅ OPTIMIZACIÓN: Un solo query con GROUP BY en vez de 5 queries
+
         List<Object[]> conteos = pedidoRepository.countByEstadoGrouped();
 
         long noAsignados = 0, asignados = 0, enTransito = 0, enAlmacen = 0, entregados = 0;

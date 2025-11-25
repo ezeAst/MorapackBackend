@@ -46,12 +46,12 @@ public class PlanificadorPersistenciaService {
                                            RutaAsignadaRepository rutaRepo,
                                            PlanificadorService algoritmo,
                                            RutaBatchService rutaBatchService,
-                                           JdbcTemplate jdbcTemplate) { // ✅ AGREGAR
+                                           JdbcTemplate jdbcTemplate) {
         this.pedidoRepo = pedidoRepo;
         this.rutaRepo = rutaRepo;
         this.algoritmo = algoritmo;
         this.rutaBatchService = rutaBatchService;
-        this.jdbcTemplate = jdbcTemplate; // ✅ AGREGAR
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
@@ -60,7 +60,7 @@ public class PlanificadorPersistenciaService {
         // 1) Calcular ventana de búsqueda: 72 horas atrás → ahora
         LocalDateTime ahora = LocalDateTime.now();
 
-        // ✅ CAMBIO: Ventana de 15 minutos (antes era 72 horas)
+
         LocalDateTime rangoInicio = ahora.minusMinutes(15);
         LocalDateTime rangoFin = ahora;
 
@@ -152,7 +152,7 @@ public class PlanificadorPersistenciaService {
                     t.setHoraSalida(horaSalidaStr);
                     t.setHoraLlegada(horaLlegadaStr);
 
-                    // ✅ USAR LA FECHA REAL DEL VUELO (ya viene convertida a Lima)
+
                     t.setFecha(horaSalidaLima.toLocalDate());
 
                     // Para el siguiente tramo, la fecha base es el día de llegada del vuelo actual
@@ -172,12 +172,12 @@ public class PlanificadorPersistenciaService {
             asignados++;
         }
 
-        // ✅ GUARDAR TODAS LAS RUTAS EN LOTE
+
         if (!rutasParaGuardar.isEmpty()) {
             rutaBatchService.guardarRutasEnLote(rutasParaGuardar);
         }
 
-        // ✅ ACTUALIZAR ESTADOS DE PEDIDOS EN LOTE
+
         List<Pedido> pedidosActualizar = new ArrayList<>();
         for (RutaAsignada ruta : rutasParaGuardar) {
             pedidoRepo.findById(ruta.getPedidoId()).ifPresent(pedido -> {
@@ -188,7 +188,7 @@ public class PlanificadorPersistenciaService {
         }
 
         if (!rutasParaGuardar.isEmpty()) {
-            // Construir un solo UPDATE con CASE WHEN
+
             StringBuilder sqlUpdate = new StringBuilder("UPDATE pedido SET estado = CASE id ");
             StringBuilder sqlTramo = new StringBuilder(", tramo_actual = CASE id ");
             StringBuilder sqlWhere = new StringBuilder(" WHERE id IN (");

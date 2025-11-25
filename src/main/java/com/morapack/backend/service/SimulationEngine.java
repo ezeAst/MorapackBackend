@@ -54,7 +54,7 @@ public class SimulationEngine {
         int flightIdCounter = 1;
         for (Vuelo vuelo : vuelosUnicos) {
             FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime);
-            // ✅ Solo incluir vuelos que salen después del startTime
+
             if (!snapshot.getDepartureTime().isBefore(startTime)) {
                 snapshots.add(snapshot);
             }
@@ -258,7 +258,7 @@ public class SimulationEngine {
                     flight.getArrivalTime()  // ← Ya es UTC
             ).getSeconds();
 
-            // ✅ Ya funciona correctamente, no necesita cambios
+
             if (departSeconds > previousSeconds && departSeconds <= currentSeconds) {
                 newEvents.add(new SimulationEvent(
                         "Vuelo " + flight.getFlightCode() + " despegó de " + flight.getOrigin(),

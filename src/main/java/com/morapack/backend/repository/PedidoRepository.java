@@ -13,7 +13,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
 
     /**
      * Encuentra pedidos que caen dentro de una semana específica
-     * ✅ OPTIMIZADO: Agregado LIMIT para evitar cargar millones de registros
+     *
      */
     @Query("SELECT p FROM Pedido p WHERE " +
             "p.anho = :anho AND " +
@@ -31,7 +31,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
 
     /**
      * Busca pedidos NO_ASIGNADO
-     * ✅ OPTIMIZADO: Agregado LIMIT y ORDER BY para mejor performance
+     *
      */
     @Query("SELECT p FROM Pedido p WHERE p.estado = 'NO_ASIGNADO' " +
             "ORDER BY p.anho, p.mes, p.dia, p.hora, p.minuto " +
@@ -40,7 +40,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
 
     /**
      * Busca pedidos por estados específicos
-     * ✅ OPTIMIZADO: Agregado LIMIT para evitar cargar millones de registros
+     *
      * Usado por OperacionesDiaDiaService
      */
     @Query("SELECT p FROM Pedido p WHERE p.estado IN :estados " +
@@ -56,7 +56,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     Optional<Long> findMaxId();
 
     /**
-     * ✅ NUEVO: Buscar pedidos NO_ASIGNADO en rango de fechas específico
+     *
      * Para el planificador automático (ventana de 72 horas)
      */
     @Query("SELECT p FROM Pedido p WHERE p.estado = 'NO_ASIGNADO' " +
@@ -78,7 +78,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     );
 
     /**
-     * ✅ NUEVO: Buscar pedidos ENTREGADOS para limpieza de almacenes
+     *
      * Solo trae los que tienen hora_entrega registrada
      */
     @Query("SELECT p FROM Pedido p WHERE p.estado = 'ENTREGADO' " +
@@ -92,7 +92,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     List<Pedido> findAllWithLimit();
 
     /**
-     * ✅ OPTIMIZACIÓN: Buscar pedidos activos con vuelos en ventana temporal
+     *
      * Solo trae pedidos cuyo próximo vuelo está cerca de despegar/aterrizar
      */
     @Query(value = """
@@ -127,13 +127,13 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     );
 
     /**
-     * ✅ OPTIMIZACIÓN: Contar pedidos por estado (en vez de traer todos)
+     *
      */
     @Query("SELECT p.estado, COUNT(p) FROM Pedido p GROUP BY p.estado")
     List<Object[]> countByEstadoGrouped();
 
     /**
-     * ✅ NUEVO: Buscar pedidos que están en un almacén específico (solo operaciones día a día)
+     *
      * Un pedido está en almacén cuando:
      * - Estado = EN_ALMACEN_INTERMEDIO (parte de operaciones día a día)
      * - El destino del tramo ANTERIOR (tramo_actual - 1) es el código del almacén
@@ -178,7 +178,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     );
 
     /**
-     * ✅ NUEVO: Buscar pedidos que están en un vuelo específico
+     *
      * Un pedido está en un vuelo cuando:
      * - Estado = EN_TRANSITO
      * - El tramo actual coincide con origen, destino, fecha y hora del vuelo

@@ -38,12 +38,9 @@ public class LectorCSV {
         try {
             List<AeropuertoEntity> entities = aeropuertoRepository.findAll();
 
-            // ✅ Obtener todos los pedidos ASIGNADOS de una sola vez
             List<Pedido> pedidosAsignados = pedidoRepository.findByEstadoIn(
                     List.of(EstadoPedido.ASIGNADO, EstadoPedido.EN_TRANSITO)  // ← Ambos
             );
-
-            // ✅ Calcular ocupación reservada por aeropuerto
             Map<String, Integer> ocupacionReservada = new HashMap<>();
             for (Pedido pedido : pedidosAsignados) {
                 String destino = pedido.getAeropuertoDestino();
@@ -54,7 +51,7 @@ public class LectorCSV {
             }
 
             for (AeropuertoEntity entity : entities) {
-                // ✅ Calcular capacidad DISPONIBLE (ocupada + reservada)
+
                 int capacidadMaxima = entity.getCapacidad();
                 int capacidadOcupada = entity.getCapacidadActual();
                 int reservada = ocupacionReservada.getOrDefault(entity.getCodigo(), 0);

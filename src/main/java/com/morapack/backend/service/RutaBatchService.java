@@ -37,7 +37,7 @@ public class RutaBatchService {
     }
 
     private void procesarBatch(List<RutaAsignada> batch) {
-        // ✅ PASO 1: Insertar TODAS las rutas_asignadas en un solo INSERT
+
         StringBuilder sqlRutas = new StringBuilder(
                 "INSERT INTO rutas_asignadas (cantidad, creado_en, pedido_id) VALUES "
         );
@@ -56,7 +56,7 @@ public class RutaBatchService {
 
         jdbcTemplate.update(sqlRutas.toString());
 
-        // ✅ PASO 2: Obtener los IDs generados usando pedido_id
+
         StringBuilder sqlGetIds = new StringBuilder("SELECT id, pedido_id FROM rutas_asignadas WHERE pedido_id IN (");
         for (int i = 0; i < batch.size(); i++) {
             if (i > 0) sqlGetIds.append(", ");
@@ -74,7 +74,7 @@ public class RutaBatchService {
             mapaPedidoRuta.put(pair[1], pair[0]); // pedidoId -> rutaId
         }
 
-        // ✅ PASO 3: Insertar TODOS los tramos en un solo INSERT
+
         StringBuilder sqlTramos = new StringBuilder(
                 "INSERT INTO rutas_tramo (capacidad_usada, destino, fecha, hora_llegada, hora_salida, orden, origen, ruta_id) VALUES "
         );

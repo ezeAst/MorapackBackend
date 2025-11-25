@@ -98,7 +98,7 @@ public class PlanificadorService {
 
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
-        // ✅ Filtrar solo vuelos que NO han despegado aún
+
         LocalDateTime ahoraLima = LocalDateTime.now(); // Ya está en hora de Lima (UTC-5)
 
         List<Vuelo> vuelosDisponibles = vuelos.stream()

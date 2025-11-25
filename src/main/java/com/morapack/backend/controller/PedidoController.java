@@ -80,7 +80,7 @@ public class PedidoController {
         // Obtener el último ID de una vez
         Long ultimoId = pedidoRepository.findMaxId().orElse(0L);
 
-        // ✅ USAR JDBC BATCH INSERT (mucho más rápido que JPA)
+
         int insertados = pedidobatchservice.insertarPedidosEnLote(pedidos, ultimoId);
 
         long endTime = System.currentTimeMillis();

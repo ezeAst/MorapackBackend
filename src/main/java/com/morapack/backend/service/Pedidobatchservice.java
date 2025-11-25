@@ -38,7 +38,7 @@ public class Pedidobatchservice {
 
         long t1 = System.currentTimeMillis();
 
-        // ✅ CONSTRUIR UN ÚNICO INSERT MASIVO
+
         StringBuilder sql = new StringBuilder("INSERT INTO pedido ");
         sql.append("(id, dia, mes, hora, minuto, anho, aeropuerto_destino, ");
         sql.append("id_cliente, cantidad, cantidad_cumplida, estado, tramo_actual, hora_entrega) VALUES ");

@@ -126,11 +126,7 @@ public class Planificador {
 
         System.out.println("\n--- Fase 2: Evolucionando con GA ---");
 
-        // TODO: Implementar GA en el futuro
-        // GA ga = new GA(poblacionInicial, parametros...);
-        // Solucion mejorSolucion = ga.evolucionar();
 
-        // Por ahora, retornar la mejor de la población inicial
         Solucion mejorSolucion = obtenerMejorSolucion(poblacionInicial);
 
         System.out.println("\n--- Mejor solución encontrada ---");

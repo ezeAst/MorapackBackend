@@ -198,12 +198,12 @@ public class Aeropuerto {
 
             if (producto.esDestinoFinal()) {
                 Duration tiempo = Duration.between(producto.getHoraLlegada(), momento);
-                // ❌ FALTA: tiempo.toHours() >= 0
+
                 if (tiempo.toHours() < 2 && !tiempo.isNegative()) { // isNegative() es equivalente pero menos claro
                     estaPresente = true;
                 }
             } else {
-                // ✅ CORRECTO: ya tiene ambas validaciones
+
                 if (!producto.getSiguienteVuelo().getHoraSalida().isBefore(momento) &&
                         !producto.getHoraLlegada().isAfter(momento)) {
                     estaPresente = true;

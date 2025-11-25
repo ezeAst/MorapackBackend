@@ -313,11 +313,11 @@ public class GRASP {
     private List<Vuelo> buscarRutaOptima(Aeropuerto origen, Aeropuerto destino,
                                          LocalDateTime fechaInicio, int plazoMaximoDias) {
 
-        // ← AGREGAR: Generar clave de caché
+
         String cacheKey = origen.getCodigo() + "-" + destino.getCodigo() + "-" +
                 fechaInicio.getDayOfMonth();  // Agrupamos por día
 
-        // ← AGREGAR: Verificar si ya tenemos esta ruta en caché
+
         if (cacheRutasGlobal.containsKey(cacheKey)) {
             List<Vuelo> rutaCacheada = cacheRutasGlobal.get(cacheKey);
 
@@ -409,7 +409,7 @@ public class GRASP {
                     continue; // Vuelo lleno, skip
                 }
 
-                // ===== NUEVA VALIDACIÓN: CAPACIDAD DE ALMACÉN =====
+
                 Aeropuerto aeropuertoLlegada = vuelo.getAeropuertoDestino();
                 LocalDateTime horaLlegada = vuelo.getHoraLlegada();
 
@@ -419,7 +419,7 @@ public class GRASP {
                 if (capacidadDisponible <= 0) {
                     continue; // Almacén lleno, skip este vuelo
                 }
-                // ===== FIN VALIDACIÓN =====
+
 
                 // Calcular tiempo de este vuelo
                 long duracionVuelo = calcularDuracionHoras(
