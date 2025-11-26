@@ -231,6 +231,9 @@ public class SimulationService {
             currentStatus = simulation.getStatus().name();
         }
 
+
+        long previousSeconds = lastUpdateSeconds.getOrDefault(simulationId, 0L);
+
         // Si está en planificación, devolver respuesta básica
         if (isPlanning || simulation.getSolucion() == null) {
             List<FlightSnapshot> allFlights = simulationFlights.getOrDefault(simulationId, new ArrayList<>());
@@ -274,7 +277,28 @@ public class SimulationService {
             metrics.updateSuccessRate();
 
             response.setMetrics(metrics);
-            response.setRecentEvents(new ArrayList<>());
+            // Generar eventos incluso durante planificación
+
+            List<WarehouseSnapshot> warehouses = simulationEngine.generateWarehouseSnapshots(
+                    simulationAeropuertos.get(simulationId), currentSeconds, simulation.getStartTime()
+            );
+
+            // Generar eventos incluso durante planificación
+            List<SimulationEvent> newEvents = simulationEngine.generateEvents(
+                    simulation,
+                    activeFlights,
+                    warehouses,
+                    previousSeconds
+            );
+
+            for (SimulationEvent event : newEvents) {
+                simulation.addEvent(event.getMessage(), event.getType());
+            }
+
+            // Actualizar último update
+            lastUpdateSeconds.put(simulationId, currentSeconds);
+
+            response.setRecentEvents(simulation.getRecentEvents(10));
             response.setCurrentDateTime(simulation.getStartTime().plusSeconds(currentSeconds).toString());
             return response;
         }
@@ -286,7 +310,6 @@ public class SimulationService {
 
 
         long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
-        long previousSeconds = lastUpdateSeconds.get(simulationId);
 
         // Actualizar estados
         List<FlightSnapshot> allFlights = simulationFlights.get(simulationId);

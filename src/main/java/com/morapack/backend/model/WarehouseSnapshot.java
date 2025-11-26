@@ -31,17 +31,18 @@ public class WarehouseSnapshot {
     private int productsAtDestination;
 
     public void updateStatus() {
-        this.occupancyPercentage = (current * 100.0) / capacity;
-        this.available = capacity - current;
+        if (capacity > 0) {
+            occupancyPercentage = Math.min(100.0, (current * 100.0) / capacity); // ← Limitar a 100%
 
-        if (occupancyPercentage >= 100) {
-            this.status = "full";
-        } else if (occupancyPercentage >= 90) {
-            this.status = "critical";
-        } else if (occupancyPercentage >= 70) {
-            this.status = "warning";
-        } else {
-            this.status = "normal";
+            if (occupancyPercentage >= 100) {
+                status = "full";
+            } else if (occupancyPercentage >= 90) {
+                status = "critical";
+            } else if (occupancyPercentage >= 70) {
+                status = "warning";
+            } else {
+                status = "normal";
+            }
         }
     }
 }

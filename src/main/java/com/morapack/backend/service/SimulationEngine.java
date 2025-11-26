@@ -176,8 +176,17 @@ public class SimulationEngine {
                 double[] origin = flight.getRoute()[0];
                 double[] destination = flight.getRoute()[1];
 
-                flight.setCurrentLng(origin[0] + (destination[0] - origin[0]) * progress);
-                flight.setCurrentLat(origin[1] + (destination[1] - origin[1]) * progress);
+                // Interpolar en proyección Mercator para que coincida visualmente con el mapa
+                double[] originMercator = latLngToMercator(origin[0], origin[1]);
+                double[] destMercator = latLngToMercator(destination[0], destination[1]);
+
+                double mercatorX = originMercator[0] + (destMercator[0] - originMercator[0]) * progress;
+                double mercatorY = originMercator[1] + (destMercator[1] - originMercator[1]) * progress;
+
+                double[] currentLatLng = mercatorToLatLng(mercatorX, mercatorY);
+
+                flight.setCurrentLng(currentLatLng[0]);
+                flight.setCurrentLat(currentLatLng[1]);
 
                 activeFlights.add(flight);
             }
@@ -206,10 +215,12 @@ public class SimulationEngine {
             snapshot.setLat(coords[1]);
 
             int ocupacionActual = aeropuerto.calcularOcupacionEnMomento(currentSimulatedTime);
+            int ocupacionMostrada = Math.min(ocupacionActual, aeropuerto.getCapacidad());
+            int disponibleMostrado = Math.max(0, aeropuerto.getCapacidad() - ocupacionActual);
 
             snapshot.setCapacity(aeropuerto.getCapacidad());
-            snapshot.setCurrent(ocupacionActual);
-            snapshot.setAvailable(aeropuerto.getCapacidad() - ocupacionActual);
+            snapshot.setCurrent(ocupacionMostrada); // ← Mostrar máximo la capacidad
+            snapshot.setAvailable(disponibleMostrado);
 
             int enTransito = 0;
             int enDestino = 0;
@@ -322,5 +333,23 @@ public class SimulationEngine {
         return vuelo.getAeropuertoOrigen().getCodigo().substring(0, 2) + "-" +
                 vuelo.getAeropuertoDestino().getCodigo().substring(0, 2) +
                 vuelo.getHoraSalida().getDayOfMonth();
+    }
+
+    /**
+     * Convierte coordenadas lat/lng a proyección Web Mercator (EPSG:3857)
+     */
+    private double[] latLngToMercator(double lng, double lat) {
+        double x = lng;
+        double y = Math.log(Math.tan(Math.PI / 4 + Math.toRadians(lat) / 2)) * 180 / Math.PI;
+        return new double[]{x, y};
+    }
+
+    /**
+     * Convierte coordenadas Web Mercator a lat/lng
+     */
+    private double[] mercatorToLatLng(double x, double y) {
+        double lng = x;
+        double lat = Math.toDegrees(2 * Math.atan(Math.exp(Math.toRadians(y))) - Math.PI / 2);
+        return new double[]{lng, lat};
     }
 }
