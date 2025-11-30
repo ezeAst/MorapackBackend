@@ -46,7 +46,7 @@ public class SimulationService {
     private final Map<String, List<OrderSnapshot>> deliveredOrders = new ConcurrentHashMap<>();
     private final Map<String, Long> lastUpdateSeconds = new ConcurrentHashMap<>();
     private final Map<String, Integer> simulationProcessedOrders = new ConcurrentHashMap<>();
-
+    private final Map<String, Solucion> simulationPartialSolution = new ConcurrentHashMap<>();
     // Junto con los otros Maps
     private final Map<String, Boolean> simulationPlanningStatus = new ConcurrentHashMap<>();
     // ✅ CONSTRUCTOR - Actualizar este también
@@ -119,6 +119,7 @@ public class SimulationService {
         deliveredOrders.put(simulationId, new ArrayList<>());
         lastUpdateSeconds.put(simulationId, 0L);
         simulationProcessedOrders.put(simulationId, 0);
+        simulationPartialSolution.put(simulationId, new Solucion(new ArrayList<>()));
 
         // 6. Inicializar engine
         simulationEngine.initializeCoordinatesCache(aeropuertos);
@@ -185,8 +186,6 @@ public class SimulationService {
 
         int nextId = simulationNextFlightId.getOrDefault(simulationId, 1);
 
-        System.out.println("📦 Batch: " + pedidosUnicos.size() + " pedidos únicos");
-        System.out.println("🆔 nextId antes: " + nextId);
 
         // Generar snapshots de vuelos del batch
         Solucion solucionParcial = new Solucion(rutasBatch);
@@ -196,15 +195,6 @@ public class SimulationService {
                 nextId
         );
 
-        System.out.println("✈️ Vuelos generados: " + nuevosVuelos.size());
-
-        // Imprimir IDs de los vuelos nuevos
-        for (FlightSnapshot vuelo : nuevosVuelos) {
-            System.out.println("   - " + vuelo.getId() + ": " + vuelo.getOrigin() + " → " + vuelo.getDestination());
-        }
-
-        simulationNextFlightId.put(simulationId, nextId + nuevosVuelos.size());
-        System.out.println("🆔 nextId después: " + simulationNextFlightId.get(simulationId));
 
         // Agregar solo vuelos que no existen ya
         List<FlightSnapshot> vuelosActuales = simulationFlights.get(simulationId);
@@ -229,17 +219,15 @@ public class SimulationService {
             }
         }
 
-        System.out.println("✅ " + agregados + " vuelos agregados. Total: " + vuelosActuales.size());
-        System.out.println("📦 Pedidos procesados total: " + simulationProcessedOrders.get(simulationId));
-        System.out.println("════════════════════════════════════════");
+        Solucion solucionAcumulativa = simulationPartialSolution.get(simulationId);
+        solucionAcumulativa.getRutas().addAll(rutasBatch);
+
     }
 
     /**
      * Obtiene el estado actual de una simulación
      */
     public SimulationStatusResponse getSimulationStatus(String simulationId) {
-
-
         Simulation simulation = activeSimulations.get(simulationId);
         if (simulation == null) {
             throw new RuntimeException("Simulación no encontrada: " + simulationId);
@@ -249,37 +237,52 @@ public class SimulationService {
         Boolean isPlanning = simulationPlanningStatus.getOrDefault(simulationId, false);
         String currentStatus;
         if (isPlanning) {
-            currentStatus = "PLANNING_IN_PROGRESS"; // Pero la simulación sigue RUNNING
+            currentStatus = "PLANNING_IN_PROGRESS";
         } else {
             currentStatus = simulation.getStatus().name();
         }
 
-
+        long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
         long previousSeconds = lastUpdateSeconds.getOrDefault(simulationId, 0L);
+
+        // Usar solución parcial si existe, sino la completa
+        Solucion solucionActual = simulation.getSolucion();
+        if (solucionActual == null) {
+            solucionActual = simulationPartialSolution.get(simulationId);
+        }
 
         // Si está en planificación, devolver respuesta básica
         if (isPlanning || simulation.getSolucion() == null) {
             List<FlightSnapshot> allFlights = simulationFlights.getOrDefault(simulationId, new ArrayList<>());
 
+            // ✅ Calcular progreso basado en tiempo (7 días = 604800 segundos)
+            long DURACION_SEMANA_SEGUNDOS = 7 * 24 * 60 * 60;
+            double progressPorTiempo = Math.min(100.0, (currentSeconds * 100.0) / DURACION_SEMANA_SEGUNDOS);
 
-            long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
             List<FlightSnapshot> activeFlights = simulationEngine.updateFlightStates(
                     allFlights, currentSeconds, simulation.getStartTime()
             );
 
-            SimulationStatusResponse response = new SimulationStatusResponse();
-            response.setElapsedSeconds(currentSeconds);
-            response.setProgressPercentage(0.0);
-            response.setStatus(currentStatus);
-            response.setCurrentDay(simulation.getStartTime().plusSeconds(currentSeconds).getDayOfMonth());
-            response.setCurrentHour(simulation.getStartTime().plusSeconds(currentSeconds).getHour());
-            response.setCurrentMinute(simulation.getStartTime().plusSeconds(currentSeconds).getMinute());
-            response.setActiveFlights(activeFlights);
-            response.setWarehouses(simulationEngine.generateWarehouseSnapshots(
-                    simulationAeropuertos.get(simulationId), currentSeconds, simulation.getStartTime()
-            ));
-            response.setActiveOrders(new ArrayList<>());
-            response.setRecentlyDeliveredOrders(new ArrayList<>());
+            List<WarehouseSnapshot> warehouses = simulationEngine.generateWarehouseSnapshots(
+                    simulationAeropuertos.get(simulationId), currentSeconds, simulation.getStartTime(), allFlights, solucionActual
+            );
+
+            // Generar eventos incluso durante planificación
+            List<SimulationEvent> newEvents = simulationEngine.generateEvents(
+                    simulation,
+                    activeFlights,
+                    warehouses,
+                    previousSeconds
+            );
+
+            for (SimulationEvent event : newEvents) {
+                simulation.addEvent(event.getMessage(), event.getType());
+            }
+
+            // Actualizar último update
+            lastUpdateSeconds.put(simulationId, currentSeconds);
+
+            // Calcular métricas parciales
             SimulationMetrics metrics = new SimulationMetrics();
             int flightsCompleted = (int) allFlights.stream()
                     .filter(f -> "landed".equals(f.getStatus()))
@@ -299,30 +302,21 @@ public class SimulationService {
             metrics.setFlightViolations(0);
             metrics.updateSuccessRate();
 
+            SimulationStatusResponse response = new SimulationStatusResponse();
+            response.setElapsedSeconds(currentSeconds);
+            response.setProgressPercentage(progressPorTiempo);
+            response.setStatus(currentStatus);
+            response.setCurrentDay(simulation.getStartTime().plusSeconds(currentSeconds).getDayOfMonth());
+            response.setCurrentHour(simulation.getStartTime().plusSeconds(currentSeconds).getHour());
+            response.setCurrentMinute(simulation.getStartTime().plusSeconds(currentSeconds).getMinute());
+            response.setActiveFlights(activeFlights);
+            response.setWarehouses(warehouses);
+            response.setActiveOrders(new ArrayList<>());
+            response.setRecentlyDeliveredOrders(new ArrayList<>());
             response.setMetrics(metrics);
-            // Generar eventos incluso durante planificación
-
-            List<WarehouseSnapshot> warehouses = simulationEngine.generateWarehouseSnapshots(
-                    simulationAeropuertos.get(simulationId), currentSeconds, simulation.getStartTime()
-            );
-
-            // Generar eventos incluso durante planificación
-            List<SimulationEvent> newEvents = simulationEngine.generateEvents(
-                    simulation,
-                    activeFlights,
-                    warehouses,
-                    previousSeconds
-            );
-
-            for (SimulationEvent event : newEvents) {
-                simulation.addEvent(event.getMessage(), event.getType());
-            }
-
-            // Actualizar último update
-            lastUpdateSeconds.put(simulationId, currentSeconds);
-
             response.setRecentEvents(simulation.getRecentEvents(10));
             response.setCurrentDateTime(simulation.getStartTime().plusSeconds(currentSeconds).toString());
+
             return response;
         }
 
@@ -330,9 +324,6 @@ public class SimulationService {
         if (simulation.isCompleted() && simulation.getStatus() != SimulationStatus.COMPLETED) {
             simulation.complete();
         }
-
-
-        long currentSeconds = simulation.calculateElapsedSimulatedSeconds();
 
         // Actualizar estados
         List<FlightSnapshot> allFlights = simulationFlights.get(simulationId);
@@ -343,7 +334,7 @@ public class SimulationService {
         );
 
         List<WarehouseSnapshot> warehouses = simulationEngine.generateWarehouseSnapshots(
-                aeropuertos, currentSeconds, simulation.getStartTime()
+                aeropuertos, currentSeconds, simulation.getStartTime(), allFlights, solucionActual
         );
 
         // Generar eventos nuevos
@@ -356,7 +347,7 @@ public class SimulationService {
         }
 
         // Actualizar métricas
-        SimulationMetrics metrics = simulationEngine.calculateMetrics(simulation.getSolucion(), allFlights);
+        SimulationMetrics metrics = simulationEngine.calculateMetrics(solucionActual, allFlights);
         simulation.setMetrics(metrics);
 
         // Guardar último update
@@ -372,10 +363,7 @@ public class SimulationService {
         List<OrderSnapshot> orders = simulationOrders.get(simulationId);
         List<OrderSnapshot> delivered = deliveredOrders.get(simulationId);
 
-        // Actualizar estado de pedidos + emitir eventos
-        updateOrderStates(simulationId, simulation, orders, delivered, simulation.getSolucion(), currentSimulatedTime);
-
-        // Determinar estado actual
+        updateOrderStates(simulationId, simulation, orders, delivered, solucionActual, currentSimulatedTime);
 
         // Crear respuesta
         SimulationStatusResponse response = new SimulationStatusResponse();

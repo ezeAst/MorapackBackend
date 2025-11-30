@@ -149,7 +149,6 @@ public class SimulationEngine {
      * Actualiza el estado de todos los vuelos según el tiempo simulado
      */
     public List<FlightSnapshot> updateFlightStates(List<FlightSnapshot> allFlights, long simulatedSeconds, LocalDateTime startTime) {
-        List<FlightSnapshot> activeFlights = new ArrayList<>();
         LocalDateTime currentSimulatedTime = startTime.plusSeconds(simulatedSeconds);
 
         for (FlightSnapshot flight : allFlights) {
@@ -182,23 +181,21 @@ public class SimulationEngine {
                 double[] origin = flight.getRoute()[0];
                 double[] destination = flight.getRoute()[1];
 
-                // Interpolar en proyección Mercator para que coincida visualmente con el mapa
+                // Interpolar en proyección Mercator
                 double[] originMercator = latLngToMercator(origin[0], origin[1]);
                 double[] destMercator = latLngToMercator(destination[0], destination[1]);
 
                 double mercatorX = originMercator[0] + (destMercator[0] - originMercator[0]) * progress;
-                double mercatorY = originMercator[1] + (destMercator[1] - originMercator[1]) * progress;
+                double mercatorY = originMercator[1] + (destMercator[1] - originMercator[1]) * progress; // ← FIX AQUÍ
 
                 double[] currentLatLng = mercatorToLatLng(mercatorX, mercatorY);
 
                 flight.setCurrentLng(currentLatLng[0]);
                 flight.setCurrentLat(currentLatLng[1]);
-
-                activeFlights.add(flight);
             }
         }
 
-        return activeFlights;
+        return allFlights;
     }
 
     /**
@@ -265,6 +262,7 @@ public class SimulationEngine {
 
         for (FlightSnapshot flight : allFlights) {
             // Ahora departureTime y arrivalTime ya están en UTC
+
             long departSeconds = Duration.between(
                     simulation.getStartTime(),
                     flight.getDepartureTime()  // ← Ya es UTC
@@ -274,6 +272,7 @@ public class SimulationEngine {
                     simulation.getStartTime(),
                     flight.getArrivalTime()  // ← Ya es UTC
             ).getSeconds();
+
 
 
             if (departSeconds > previousSeconds && departSeconds <= currentSeconds) {
@@ -357,5 +356,95 @@ public class SimulationEngine {
         double lng = x;
         double lat = Math.toDegrees(2 * Math.atan(Math.exp(Math.toRadians(y))) - Math.PI / 2);
         return new double[]{lng, lat};
+    }
+
+    public List<WarehouseSnapshot> generateWarehouseSnapshots(List<Aeropuerto> aeropuertos, long simulatedSeconds, LocalDateTime startTime, List<FlightSnapshot> allFlights, Solucion solucion) {
+        List<WarehouseSnapshot> snapshots = new ArrayList<>();
+        LocalDateTime currentSimulatedTime = startTime.plusSeconds(simulatedSeconds);
+
+        int warehouseId = 1;
+        for (Aeropuerto aeropuerto : aeropuertos) {
+            WarehouseSnapshot snapshot = new WarehouseSnapshot();
+
+            snapshot.setId("W" + warehouseId++);
+            snapshot.setName(aeropuerto.getNombre());
+            snapshot.setCode(aeropuerto.getCodigo());
+
+            double[] coords = coordinatesCache.getOrDefault(aeropuerto.getCodigo(), new double[]{0, 0});
+            snapshot.setLng(coords[0]);
+            snapshot.setLat(coords[1]);
+
+            // ✅ CALCULAR OCUPACIÓN BASÁNDOSE EN VUELOS EN TIEMPO REAL
+            int ocupacionActual = calcularOcupacionPorVuelos(aeropuerto, allFlights, currentSimulatedTime, solucion);
+
+            snapshot.setCapacity(aeropuerto.getCapacidad());
+            snapshot.setCurrent(Math.min(ocupacionActual, aeropuerto.getCapacidad())); // Limitar a capacidad
+            snapshot.setAvailable(Math.max(0, aeropuerto.getCapacidad() - ocupacionActual));
+
+            snapshot.setProductsInTransit(0);
+            snapshot.setProductsAtDestination(0);
+            snapshot.updateStatus();
+
+            snapshots.add(snapshot);
+        }
+
+        return snapshots;
+    }
+
+    /**
+     * Calcula ocupación del almacén basándose en vuelos que han aterizado
+     */
+    private int calcularOcupacionPorVuelos(Aeropuerto aeropuerto, List<FlightSnapshot> allFlights, LocalDateTime currentTime, Solucion solucion) {
+        int ocupacion = 0;
+
+        // Si no hay solución aún, no podemos calcular ocupación correctamente
+        if (solucion == null) {
+            return 0;
+        }
+
+        // Recorrer todas las rutas para encontrar paquetes en este aeropuerto
+        for (Ruta ruta : solucion.getRutas()) {
+            List<Vuelo> vuelos = ruta.getVuelos();
+
+            for (int i = 0; i < vuelos.size(); i++) {
+                Vuelo vuelo = vuelos.get(i);
+
+                // Solo considerar vuelos que llegan a este aeropuerto
+                if (!vuelo.getAeropuertoDestino().getNombre().equals(aeropuerto.getNombre())) {
+                    continue;
+                }
+
+                // Convertir horas a hora de Lima
+                LocalDateTime llegadaLima = convertirAHoraLima(vuelo.getHoraLlegada(), vuelo.getAeropuertoDestino().getHusoHorario());
+
+                boolean esDestinoFinal = (i == vuelos.size() - 1);
+                int cantidad = ruta.getPedido().getCantidad();
+
+                if (esDestinoFinal) {
+                    // Destino final: permanece 2 horas
+                    Duration tiempoDesde = Duration.between(llegadaLima, currentTime);
+                    if (!tiempoDesde.isNegative() && tiempoDesde.toHours() < 2) {
+                        ocupacion += cantidad;
+                    }
+                } else {
+                    // Tránsito: permanece hasta el siguiente vuelo
+                    Vuelo siguienteVuelo = vuelos.get(i + 1);
+                    LocalDateTime salidaLima = convertirAHoraLima(siguienteVuelo.getHoraSalida(), siguienteVuelo.getAeropuertoOrigen().getHusoHorario());
+
+                    if ((currentTime.isAfter(llegadaLima) || currentTime.isEqual(llegadaLima)) &&
+                            (currentTime.isBefore(salidaLima) || currentTime.isEqual(salidaLima))) {
+                        ocupacion += cantidad;
+                    }
+                }
+            }
+        }
+
+        return ocupacion;
+    }
+
+    private LocalDateTime convertirAHoraLima(LocalDateTime horaLocal, int husoLocal) {
+        final int HUSO_LIMA = -5;
+        LocalDateTime utc = horaLocal.minusHours(husoLocal);
+        return utc.plusHours(HUSO_LIMA);
     }
 }

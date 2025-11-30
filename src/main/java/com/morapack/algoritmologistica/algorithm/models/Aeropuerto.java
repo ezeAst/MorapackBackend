@@ -143,24 +143,28 @@ public class Aeropuerto {
 
 
     public int calcularOcupacionEnMomento(LocalDateTime momento) {
+        final int HUSO_LIMA = -5;
         int ocupacion = 0;
 
         for (ProductoEnAlmacen producto : productosActuales) {
             boolean estaPresente = false;
 
+            // ✅ Convertir horas a hora de Lima para comparar
+            LocalDateTime horaLlegadaLima = convertirAHoraLima(producto.getHoraLlegada(), this.husoHorario);
+
             if (producto.esDestinoFinal()) {
-                // Destino: está presente si no han pasado 2 horas Y ya llegó
-                Duration tiempo = Duration.between(producto.getHoraLlegada(), momento);
+                Duration tiempo = Duration.between(horaLlegadaLima, momento);
                 if (!tiempo.isNegative() && tiempo.compareTo(Duration.ofHours(2)) < 0) {
                     estaPresente = true;
                 }
             } else {
-                // Tránsito: está presente si el siguiente vuelo NO ha salido Y ya llegó
-                LocalDateTime llegada = producto.getHoraLlegada();
-                LocalDateTime salida = producto.getSiguienteVuelo().getHoraSalida();
+                LocalDateTime horaSalidaLima = convertirAHoraLima(
+                        producto.getSiguienteVuelo().getHoraSalida(),
+                        this.husoHorario
+                );
 
-                if ((momento.isAfter(llegada) || momento.isEqual(llegada)) &&
-                        (momento.isBefore(salida) || momento.isEqual(salida))) {
+                if ((momento.isAfter(horaLlegadaLima) || momento.isEqual(horaLlegadaLima)) &&
+                        (momento.isBefore(horaSalidaLima) || momento.isEqual(horaSalidaLima))) {
                     estaPresente = true;
                 }
             }
@@ -171,6 +175,14 @@ public class Aeropuerto {
         }
 
         return ocupacion;
+    }
+
+    private LocalDateTime convertirAHoraLima(LocalDateTime horaLocal, int husoLocal) {
+        final int HUSO_LIMA = -5;
+        // Convertir a UTC primero
+        LocalDateTime utc = horaLocal.minusHours(husoLocal);
+        // Luego a hora de Lima
+        return utc.plusHours(HUSO_LIMA);
     }
 
     /**
