@@ -11,12 +11,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class SimulationEngine {
 
     private final AeropuertoRepository aeropuertoRepository;
     private final Map<String, double[]> coordinatesCache = new HashMap<>();
+
 
     public SimulationEngine(AeropuertoRepository aeropuertoRepository) {
         this.aeropuertoRepository = aeropuertoRepository;
@@ -44,6 +46,10 @@ public class SimulationEngine {
      * Genera snapshots iniciales de todos los vuelos
      */
     public List<FlightSnapshot> generateInitialFlightSnapshots(Solucion solucion, LocalDateTime startTime) {
+        return generateInitialFlightSnapshots(solucion, startTime, 1);
+    }
+
+    public List<FlightSnapshot> generateInitialFlightSnapshots(Solucion solucion, LocalDateTime startTime, int startId) {
         List<FlightSnapshot> snapshots = new ArrayList<>();
         Set<Vuelo> vuelosUnicos = new HashSet<>();
 
@@ -51,10 +57,11 @@ public class SimulationEngine {
             vuelosUnicos.addAll(ruta.getVuelos());
         }
 
-        int flightIdCounter = 1;
+        int flightIdCounter = startId;
         for (Vuelo vuelo : vuelosUnicos) {
-            FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime);
+            FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime); // ← SOLO este incremento
 
+            // Solo agregar si sale después del startTime
             if (!snapshot.getDepartureTime().isBefore(startTime)) {
                 snapshots.add(snapshot);
             }
@@ -62,7 +69,6 @@ public class SimulationEngine {
 
         return snapshots;
     }
-
     /**
      * Crea un snapshot de vuelo individual
      */

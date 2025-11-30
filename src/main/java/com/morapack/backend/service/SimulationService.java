@@ -27,6 +27,7 @@ public class SimulationService {
     private volatile boolean planificacionEnProgreso = false;
     private final SimulationEngine simulationEngine;
     private final PedidoRepository pedidoRepository;
+    private final Map<String, Integer> simulationNextFlightId = new ConcurrentHashMap<>();
 
     @Value("${app.data.aeropuertos-path}")
     private String aeropuertosPath;
@@ -106,6 +107,7 @@ public class SimulationService {
         simulation.setStartTime(startTimeLima);
         simulation.start(); // ← Iniciar INMEDIATAMENTE
         String simulationId = simulation.getId();
+        simulationNextFlightId.put(simulationId, 1);
 
         // 5. Inicializar estructuras vacías
         activeSimulations.put(simulationId, simulation);
@@ -169,6 +171,7 @@ public class SimulationService {
     }
 
     // Nuevo método para procesar batches incrementales
+// Nuevo método para procesar batches incrementales
     private void procesarRutasBatch(String simulationId, List<Ruta> rutasBatch, LocalDateTime startTime) {
         // Contar pedidos únicos en este batch
         Set<String> pedidosUnicos = new HashSet<>();
@@ -180,12 +183,28 @@ public class SimulationService {
         int currentCount = simulationProcessedOrders.getOrDefault(simulationId, 0);
         simulationProcessedOrders.put(simulationId, currentCount + pedidosUnicos.size());
 
+        int nextId = simulationNextFlightId.getOrDefault(simulationId, 1);
+
+        System.out.println("📦 Batch: " + pedidosUnicos.size() + " pedidos únicos");
+        System.out.println("🆔 nextId antes: " + nextId);
+
         // Generar snapshots de vuelos del batch
         Solucion solucionParcial = new Solucion(rutasBatch);
         List<FlightSnapshot> nuevosVuelos = simulationEngine.generateInitialFlightSnapshots(
                 solucionParcial,
-                startTime
+                startTime,
+                nextId
         );
+
+        System.out.println("✈️ Vuelos generados: " + nuevosVuelos.size());
+
+        // Imprimir IDs de los vuelos nuevos
+        for (FlightSnapshot vuelo : nuevosVuelos) {
+            System.out.println("   - " + vuelo.getId() + ": " + vuelo.getOrigin() + " → " + vuelo.getDestination());
+        }
+
+        simulationNextFlightId.put(simulationId, nextId + nuevosVuelos.size());
+        System.out.println("🆔 nextId después: " + simulationNextFlightId.get(simulationId));
 
         // Agregar solo vuelos que no existen ya
         List<FlightSnapshot> vuelosActuales = simulationFlights.get(simulationId);
@@ -209,6 +228,10 @@ public class SimulationService {
                 agregados++;
             }
         }
+
+        System.out.println("✅ " + agregados + " vuelos agregados. Total: " + vuelosActuales.size());
+        System.out.println("📦 Pedidos procesados total: " + simulationProcessedOrders.get(simulationId));
+        System.out.println("════════════════════════════════════════");
     }
 
     /**
