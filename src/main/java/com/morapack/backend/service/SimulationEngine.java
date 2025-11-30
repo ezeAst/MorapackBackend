@@ -11,12 +11,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class SimulationEngine {
 
     private final AeropuertoRepository aeropuertoRepository;
     private final Map<String, double[]> coordinatesCache = new HashMap<>();
+
 
     public SimulationEngine(AeropuertoRepository aeropuertoRepository) {
         this.aeropuertoRepository = aeropuertoRepository;
@@ -44,6 +46,10 @@ public class SimulationEngine {
      * Genera snapshots iniciales de todos los vuelos
      */
     public List<FlightSnapshot> generateInitialFlightSnapshots(Solucion solucion, LocalDateTime startTime) {
+        return generateInitialFlightSnapshots(solucion, startTime, 1);
+    }
+
+    public List<FlightSnapshot> generateInitialFlightSnapshots(Solucion solucion, LocalDateTime startTime, int startId) {
         List<FlightSnapshot> snapshots = new ArrayList<>();
         Set<Vuelo> vuelosUnicos = new HashSet<>();
 
@@ -51,10 +57,11 @@ public class SimulationEngine {
             vuelosUnicos.addAll(ruta.getVuelos());
         }
 
-        int flightIdCounter = 1;
+        int flightIdCounter = startId;
         for (Vuelo vuelo : vuelosUnicos) {
-            FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime);
+            FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime); // ← SOLO este incremento
 
+            // Solo agregar si sale después del startTime
             if (!snapshot.getDepartureTime().isBefore(startTime)) {
                 snapshots.add(snapshot);
             }
@@ -62,7 +69,6 @@ public class SimulationEngine {
 
         return snapshots;
     }
-
     /**
      * Crea un snapshot de vuelo individual
      */
@@ -143,7 +149,6 @@ public class SimulationEngine {
      * Actualiza el estado de todos los vuelos según el tiempo simulado
      */
     public List<FlightSnapshot> updateFlightStates(List<FlightSnapshot> allFlights, long simulatedSeconds, LocalDateTime startTime) {
-        List<FlightSnapshot> activeFlights = new ArrayList<>();
         LocalDateTime currentSimulatedTime = startTime.plusSeconds(simulatedSeconds);
 
         for (FlightSnapshot flight : allFlights) {
@@ -176,14 +181,21 @@ public class SimulationEngine {
                 double[] origin = flight.getRoute()[0];
                 double[] destination = flight.getRoute()[1];
 
-                flight.setCurrentLng(origin[0] + (destination[0] - origin[0]) * progress);
-                flight.setCurrentLat(origin[1] + (destination[1] - origin[1]) * progress);
+                // Interpolar en proyección Mercator
+                double[] originMercator = latLngToMercator(origin[0], origin[1]);
+                double[] destMercator = latLngToMercator(destination[0], destination[1]);
 
-                activeFlights.add(flight);
+                double mercatorX = originMercator[0] + (destMercator[0] - originMercator[0]) * progress;
+                double mercatorY = originMercator[1] + (destMercator[1] - originMercator[1]) * progress; // ← FIX AQUÍ
+
+                double[] currentLatLng = mercatorToLatLng(mercatorX, mercatorY);
+
+                flight.setCurrentLng(currentLatLng[0]);
+                flight.setCurrentLat(currentLatLng[1]);
             }
         }
 
-        return activeFlights;
+        return allFlights;
     }
 
     /**
@@ -206,10 +218,12 @@ public class SimulationEngine {
             snapshot.setLat(coords[1]);
 
             int ocupacionActual = aeropuerto.calcularOcupacionEnMomento(currentSimulatedTime);
+            int ocupacionMostrada = Math.min(ocupacionActual, aeropuerto.getCapacidad());
+            int disponibleMostrado = Math.max(0, aeropuerto.getCapacidad() - ocupacionActual);
 
             snapshot.setCapacity(aeropuerto.getCapacidad());
-            snapshot.setCurrent(ocupacionActual);
-            snapshot.setAvailable(aeropuerto.getCapacidad() - ocupacionActual);
+            snapshot.setCurrent(ocupacionMostrada); // ← Mostrar máximo la capacidad
+            snapshot.setAvailable(disponibleMostrado);
 
             int enTransito = 0;
             int enDestino = 0;
@@ -248,6 +262,7 @@ public class SimulationEngine {
 
         for (FlightSnapshot flight : allFlights) {
             // Ahora departureTime y arrivalTime ya están en UTC
+
             long departSeconds = Duration.between(
                     simulation.getStartTime(),
                     flight.getDepartureTime()  // ← Ya es UTC
@@ -257,6 +272,7 @@ public class SimulationEngine {
                     simulation.getStartTime(),
                     flight.getArrivalTime()  // ← Ya es UTC
             ).getSeconds();
+
 
 
             if (departSeconds > previousSeconds && departSeconds <= currentSeconds) {
@@ -322,5 +338,104 @@ public class SimulationEngine {
         return vuelo.getAeropuertoOrigen().getCodigo().substring(0, 2) + "-" +
                 vuelo.getAeropuertoDestino().getCodigo().substring(0, 2) +
                 vuelo.getHoraSalida().getDayOfMonth();
+    }
+
+    /**
+     * Convierte coordenadas lat/lng a proyección Web Mercator (EPSG:3857)
+     */
+    private double[] latLngToMercator(double lng, double lat) {
+        double x = lng;
+        double y = Math.log(Math.tan(Math.PI / 4 + Math.toRadians(lat) / 2)) * 180 / Math.PI;
+        return new double[]{x, y};
+    }
+
+    /**
+     * Convierte coordenadas Web Mercator a lat/lng
+     */
+    private double[] mercatorToLatLng(double x, double y) {
+        double lng = x;
+        double lat = Math.toDegrees(2 * Math.atan(Math.exp(Math.toRadians(y))) - Math.PI / 2);
+        return new double[]{lng, lat};
+    }
+
+    public List<WarehouseSnapshot> generateWarehouseSnapshots(List<Aeropuerto> aeropuertos, long simulatedSeconds, LocalDateTime startTime, List<FlightSnapshot> allFlights, Solucion solucion) {
+        List<WarehouseSnapshot> snapshots = new ArrayList<>();
+        LocalDateTime currentSimulatedTime = startTime.plusSeconds(simulatedSeconds);
+
+        int warehouseId = 1;
+        for (Aeropuerto aeropuerto : aeropuertos) {
+            WarehouseSnapshot snapshot = new WarehouseSnapshot();
+
+            snapshot.setId("W" + warehouseId++);
+            snapshot.setName(aeropuerto.getNombre());
+            snapshot.setCode(aeropuerto.getCodigo());
+
+            double[] coords = coordinatesCache.getOrDefault(aeropuerto.getCodigo(), new double[]{0, 0});
+            snapshot.setLng(coords[0]);
+            snapshot.setLat(coords[1]);
+
+            // ✅ CALCULAR OCUPACIÓN BASÁNDOSE EN VUELOS EN TIEMPO REAL
+            int ocupacionActual = calcularOcupacionPorVuelos(aeropuerto, allFlights, currentSimulatedTime, solucion);
+
+            snapshot.setCapacity(aeropuerto.getCapacidad());
+            snapshot.setCurrent(Math.min(ocupacionActual, aeropuerto.getCapacidad())); // Limitar a capacidad
+            snapshot.setAvailable(Math.max(0, aeropuerto.getCapacidad() - ocupacionActual));
+
+            snapshot.setProductsInTransit(0);
+            snapshot.setProductsAtDestination(0);
+            snapshot.updateStatus();
+
+            snapshots.add(snapshot);
+        }
+
+        return snapshots;
+    }
+
+    /**
+     * Calcula ocupación del almacén basándose en vuelos que han aterizado
+     */
+    private int calcularOcupacionPorVuelos(Aeropuerto aeropuerto, List<FlightSnapshot> allFlights, LocalDateTime currentTime, Solucion solucion) {
+        int ocupacion = 0;
+
+        // 1. SUMAR: Paquetes que llegaron (landed) hace menos de 2 horas
+        for (FlightSnapshot flight : allFlights) {
+            if (!flight.getDestination().equals(aeropuerto.getNombre())) {
+                continue;
+            }
+
+            if ("landed".equals(flight.getStatus())) {
+                Duration tiempoDesdeAterrizaje = Duration.between(flight.getArrivalTime(), currentTime);
+
+                if (!tiempoDesdeAterrizaje.isNegative() && tiempoDesdeAterrizaje.toHours() < 2) {
+                    ocupacion += flight.getPackages();
+                }
+            }
+        }
+
+        // 2. RESTAR: Paquetes que ya salieron en vuelos desde este aeropuerto
+        for (FlightSnapshot flight : allFlights) {
+            if (!flight.getOrigin().equals(aeropuerto.getNombre())) {
+                continue;
+            }
+
+            // Si el vuelo ya despegó (in_flight o landed), sus paquetes ya no están en el almacén
+            if ("in_flight".equals(flight.getStatus()) || "landed".equals(flight.getStatus())) {
+                Duration tiempoDesdeDespegue = Duration.between(flight.getDepartureTime(), currentTime);
+
+                // Solo restar si despegó recientemente (hace menos de 2 horas)
+                // Esto evita doble conteo con vuelos muy antiguos
+                if (!tiempoDesdeDespegue.isNegative() && tiempoDesdeDespegue.toHours() < 2) {
+                    ocupacion -= flight.getPackages();
+                }
+            }
+        }
+
+        return Math.max(0, ocupacion); // No permitir negativos
+    }
+
+    private LocalDateTime convertirAHoraLima(LocalDateTime horaLocal, int husoLocal) {
+        final int HUSO_LIMA = -5;
+        LocalDateTime utc = horaLocal.minusHours(husoLocal);
+        return utc.plusHours(HUSO_LIMA);
     }
 }

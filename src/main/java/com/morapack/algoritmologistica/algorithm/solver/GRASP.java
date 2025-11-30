@@ -192,9 +192,9 @@ public class GRASP {
             }
 
             if (cantidadRestante > 0) {
-                System.out.println("ERROR CRÍTICO: Pedido " + pedido.getIdCliente() +
-                        " NO completado. Quedan " + cantidadRestante +
-                        " productos sin asignar después de " + intentos + " intentos.");
+//                System.out.println("ERROR CRÍTICO: Pedido " + pedido.getIdCliente() +
+//                        " NO completado. Quedan " + cantidadRestante +
+//                        " productos sin asignar después de " + intentos + " intentos.");
             }
 
             contadorPedidos++;
