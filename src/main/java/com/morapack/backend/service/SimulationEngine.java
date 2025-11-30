@@ -397,49 +397,40 @@ public class SimulationEngine {
     private int calcularOcupacionPorVuelos(Aeropuerto aeropuerto, List<FlightSnapshot> allFlights, LocalDateTime currentTime, Solucion solucion) {
         int ocupacion = 0;
 
-        // Si no hay solución aún, no podemos calcular ocupación correctamente
-        if (solucion == null) {
-            return 0;
-        }
+        // 1. SUMAR: Paquetes que llegaron (landed) hace menos de 2 horas
+        for (FlightSnapshot flight : allFlights) {
+            if (!flight.getDestination().equals(aeropuerto.getNombre())) {
+                continue;
+            }
 
-        // Recorrer todas las rutas para encontrar paquetes en este aeropuerto
-        for (Ruta ruta : solucion.getRutas()) {
-            List<Vuelo> vuelos = ruta.getVuelos();
+            if ("landed".equals(flight.getStatus())) {
+                Duration tiempoDesdeAterrizaje = Duration.between(flight.getArrivalTime(), currentTime);
 
-            for (int i = 0; i < vuelos.size(); i++) {
-                Vuelo vuelo = vuelos.get(i);
-
-                // Solo considerar vuelos que llegan a este aeropuerto
-                if (!vuelo.getAeropuertoDestino().getNombre().equals(aeropuerto.getNombre())) {
-                    continue;
-                }
-
-                // Convertir horas a hora de Lima
-                LocalDateTime llegadaLima = convertirAHoraLima(vuelo.getHoraLlegada(), vuelo.getAeropuertoDestino().getHusoHorario());
-
-                boolean esDestinoFinal = (i == vuelos.size() - 1);
-                int cantidad = ruta.getPedido().getCantidad();
-
-                if (esDestinoFinal) {
-                    // Destino final: permanece 2 horas
-                    Duration tiempoDesde = Duration.between(llegadaLima, currentTime);
-                    if (!tiempoDesde.isNegative() && tiempoDesde.toHours() < 2) {
-                        ocupacion += cantidad;
-                    }
-                } else {
-                    // Tránsito: permanece hasta el siguiente vuelo
-                    Vuelo siguienteVuelo = vuelos.get(i + 1);
-                    LocalDateTime salidaLima = convertirAHoraLima(siguienteVuelo.getHoraSalida(), siguienteVuelo.getAeropuertoOrigen().getHusoHorario());
-
-                    if ((currentTime.isAfter(llegadaLima) || currentTime.isEqual(llegadaLima)) &&
-                            (currentTime.isBefore(salidaLima) || currentTime.isEqual(salidaLima))) {
-                        ocupacion += cantidad;
-                    }
+                if (!tiempoDesdeAterrizaje.isNegative() && tiempoDesdeAterrizaje.toHours() < 2) {
+                    ocupacion += flight.getPackages();
                 }
             }
         }
 
-        return ocupacion;
+        // 2. RESTAR: Paquetes que ya salieron en vuelos desde este aeropuerto
+        for (FlightSnapshot flight : allFlights) {
+            if (!flight.getOrigin().equals(aeropuerto.getNombre())) {
+                continue;
+            }
+
+            // Si el vuelo ya despegó (in_flight o landed), sus paquetes ya no están en el almacén
+            if ("in_flight".equals(flight.getStatus()) || "landed".equals(flight.getStatus())) {
+                Duration tiempoDesdeDespegue = Duration.between(flight.getDepartureTime(), currentTime);
+
+                // Solo restar si despegó recientemente (hace menos de 2 horas)
+                // Esto evita doble conteo con vuelos muy antiguos
+                if (!tiempoDesdeDespegue.isNegative() && tiempoDesdeDespegue.toHours() < 2) {
+                    ocupacion -= flight.getPackages();
+                }
+            }
+        }
+
+        return Math.max(0, ocupacion); // No permitir negativos
     }
 
     private LocalDateTime convertirAHoraLima(LocalDateTime horaLocal, int husoLocal) {
