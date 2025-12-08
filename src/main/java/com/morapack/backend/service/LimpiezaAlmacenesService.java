@@ -21,13 +21,19 @@ public class LimpiezaAlmacenesService {
 
     private final PedidoRepository pedidoRepository;
     private final AeropuertoRepository aeropuertoRepository;
+    private final TiempoSimuladoService tiempoSimuladoService;
+    private final OperacionesDiaDiaService operacionesDiaDiaService;
 
     public LimpiezaAlmacenesService(
             PedidoRepository pedidoRepository,
-            AeropuertoRepository aeropuertoRepository
+            AeropuertoRepository aeropuertoRepository,
+            TiempoSimuladoService tiempoSimuladoService,
+            OperacionesDiaDiaService operacionesDiaDiaService
     ) {
         this.pedidoRepository = pedidoRepository;
         this.aeropuertoRepository = aeropuertoRepository;
+        this.tiempoSimuladoService = tiempoSimuladoService;
+        this.operacionesDiaDiaService = operacionesDiaDiaService;
     }
 
     /**
@@ -38,7 +44,15 @@ public class LimpiezaAlmacenesService {
     @Scheduled(fixedDelay = 3600000) // 2 horas = 7,200,000 milisegundos
     @Transactional
     public void limpiarProductosEntregados() {
+        // Solo ejecutar si las operaciones día a día están activas
+        if (!operacionesDiaDiaService.isActivo()) {
+            return;
+        }
+
         log.info("🧹 Iniciando limpieza de almacenes...");
+
+        // Usar tiempo simulado
+        LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
 
         // Buscar pedidos ENTREGADOS
         List<Pedido> pedidosEntregados = pedidoRepository.findEntregadosParaLimpieza();
@@ -48,8 +62,6 @@ public class LimpiezaAlmacenesService {
 
         for (Pedido pedido : pedidosEntregados) {
             // Verificar si tiene hora_entrega registrada
-
-
             if (pedido.getHoraEntrega() == null) {
                 continue; // Saltar si no tiene hora de entrega
             }
@@ -57,8 +69,8 @@ public class LimpiezaAlmacenesService {
             LocalDateTime horaEntrega = pedido.getHoraEntrega();
             LocalDateTime dosHorasDespuesDeEntrega = horaEntrega.plusHours(2);
 
-            // Verificar si han pasado más de 2 horas desde la entrega
-            if (pedido.getHoraEntrega().isBefore(dosHorasDespuesDeEntrega)) {
+            // Verificar si han pasado más de 2 horas desde la entrega (usando tiempo simulado)
+            if (ahora.isAfter(dosHorasDespuesDeEntrega)) {
                 // Liberar espacio del almacén destino
                 AeropuertoEntity aeropuerto = aeropuertoRepository
                         .findByCodigo(pedido.getAeropuertoDestino())

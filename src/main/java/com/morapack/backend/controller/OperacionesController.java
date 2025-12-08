@@ -2,6 +2,7 @@ package com.morapack.backend.controller;
 
 import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
+import com.morapack.backend.dto.InicioOperacionesRequest;
 import com.morapack.backend.entity.AeropuertoEntity;
 import com.morapack.backend.entity.RutaAsignada;
 import com.morapack.backend.entity.RutaTramo;
@@ -9,6 +10,7 @@ import com.morapack.backend.repository.AeropuertoRepository;
 import com.morapack.backend.repository.PedidoRepository;
 import com.morapack.backend.repository.RutaAsignadaRepository;
 import com.morapack.backend.service.OperacionesDiaDiaService;
+import com.morapack.backend.service.TiempoSimuladoService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,32 +29,82 @@ public class OperacionesController {
     private final PedidoRepository pedidoRepository;
     private final RutaAsignadaRepository rutaAsignadaRepository;
     private final AeropuertoRepository aeropuertoRepository;
+    private final TiempoSimuladoService tiempoSimuladoService;
 
     public OperacionesController(OperacionesDiaDiaService operacionesService,
                                  PedidoRepository pedidoRepository,
                                  RutaAsignadaRepository rutaAsignadaRepository,
-                                 AeropuertoRepository aeropuertoRepository) {
+                                 AeropuertoRepository aeropuertoRepository,
+                                 TiempoSimuladoService tiempoSimuladoService) {
         this.operacionesService = operacionesService;
         this.pedidoRepository = pedidoRepository;
         this.rutaAsignadaRepository = rutaAsignadaRepository;
         this.aeropuertoRepository = aeropuertoRepository;
+        this.tiempoSimuladoService = tiempoSimuladoService;
     }
 
     /**
      * POST /api/operaciones/start
-     * Inicia las operaciones día a día
+     * Inicia las operaciones día a día con una fecha/hora específica
+     *
+     * Body JSON:
+     * {
+     *   "fechaHoraInicio": "2025-01-15T08:00:00"
+     * }
      */
     @PostMapping("/start")
-    public ResponseEntity<Map<String, Object>> iniciarOperaciones() {
+    public ResponseEntity<Map<String, Object>> iniciarOperaciones(@RequestBody InicioOperacionesRequest request) {
+        try {
+            System.out.println("📥 Request recibido para iniciar operaciones");
+            System.out.println("📋 Request string: " + request.getFechaHoraInicio());
 
-        operacionesService.iniciar(); // Sin parámetros
+            // Validar que el string no sea null
+            if (request.getFechaHoraInicio() == null || request.getFechaHoraInicio().trim().isEmpty()) {
+                System.err.println("❌ Error: fechaHoraInicio es null o vacío");
+                Map<String, Object> error = new HashMap<>();
+                error.put("status", "error");
+                error.put("message", "Debe proporcionar fechaHoraInicio en formato ISO: yyyy-MM-dd'T'HH:mm:ss");
+                return ResponseEntity.badRequest().body(error);
+            }
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("status", "iniciado");
-        response.put("startTime", operacionesService.getInicioOperaciones());
-        response.put("message", "Operaciones día a día iniciadas en tiempo real");
+            // Parsear el string a LocalDateTime
+            LocalDateTime fechaHoraInicio;
+            try {
+                fechaHoraInicio = request.toLocalDateTime();
+                System.out.println("📅 Fecha/Hora parseada: " + fechaHoraInicio);
+            } catch (Exception e) {
+                System.err.println("❌ Error parseando fecha: " + e.getMessage());
+                Map<String, Object> error = new HashMap<>();
+                error.put("status", "error");
+                error.put("message", "Formato de fecha inválido. Use: yyyy-MM-dd'T'HH:mm:ss (ejemplo: 2025-01-15T08:00:00)");
+                return ResponseEntity.badRequest().body(error);
+            }
 
-        return ResponseEntity.ok(response);
+            System.out.println("🚀 Iniciando operaciones con fecha/hora: " + fechaHoraInicio);
+
+            // Iniciar operaciones con la fecha/hora proporcionada
+            operacionesService.iniciar(fechaHoraInicio);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "iniciado");
+            response.put("startTime", operacionesService.getInicioOperaciones().toString());
+            response.put("tiempoSimulado", fechaHoraInicio.toString());
+            response.put("message", "Operaciones día a día iniciadas desde " + fechaHoraInicio);
+
+            System.out.println("✅ Operaciones iniciadas exitosamente");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            System.err.println("❌ Error al iniciar operaciones: " + e.getMessage());
+            e.printStackTrace();
+
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", "Error al iniciar operaciones: " + e.getMessage());
+
+            return ResponseEntity.status(500).body(error);
+        }
     }
 
     /**
@@ -78,10 +130,12 @@ public class OperacionesController {
     public ResponseEntity<Map<String, Object>> obtenerEstado() {
         Map<String, Object> response = new HashMap<>();
 
-        LocalDateTime ahora = LocalDateTime.now();
+        // Usar tiempo simulado en lugar de tiempo real
+        LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
 
         // Información general
         response.put("currentDateTime", ahora);
+        response.put("usandoTiempoSimulado", tiempoSimuladoService.isUsandoTiempoSimulado());
         response.put("activo", operacionesService.isActivo());
         response.put("inicioOperaciones", operacionesService.getInicioOperaciones());
 
