@@ -41,34 +41,40 @@ public class PlanificadorPersistenciaService {
     private final PlanificadorService algoritmo;
     private final RutaBatchService rutaBatchService;
     private final JdbcTemplate jdbcTemplate;
+    private final TiempoSimuladoService tiempoSimuladoService;
+    private final OperacionesDiaDiaService operacionesDiaDiaService;
 
     public PlanificadorPersistenciaService(PedidoRepository pedidoRepo,
                                            RutaAsignadaRepository rutaRepo,
                                            PlanificadorService algoritmo,
                                            RutaBatchService rutaBatchService,
-                                           JdbcTemplate jdbcTemplate) {
+                                           JdbcTemplate jdbcTemplate,
+                                           TiempoSimuladoService tiempoSimuladoService,
+                                           OperacionesDiaDiaService operacionesDiaDiaService) {
         this.pedidoRepo = pedidoRepo;
         this.rutaRepo = rutaRepo;
         this.algoritmo = algoritmo;
         this.rutaBatchService = rutaBatchService;
         this.jdbcTemplate = jdbcTemplate;
+        this.tiempoSimuladoService = tiempoSimuladoService;
+        this.operacionesDiaDiaService = operacionesDiaDiaService;
     }
 
     @Transactional
     public String ejecutarYGuardar() {
+        // Solo ejecutar si las operaciones día a día están activas
+        if (!operacionesDiaDiaService.isActivo()) {
+            return "Scheduler desactivado - operaciones no iniciadas";
+        }
 
-        // 1) Calcular ventana de búsqueda: 72 horas atrás → ahora
-        LocalDateTime ahora = LocalDateTime.now();
-
+        // 1) Calcular ventana de búsqueda: 15 minutos atrás → ahora (con tiempo simulado)
+        LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
 
         LocalDateTime rangoInicio = ahora.minusMinutes(15);
         LocalDateTime rangoFin = ahora;
 
-
         System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
         System.out.println("   (Buscando pedidos atrasados y actuales)");
-
-        System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
 
         // 2) Buscar pedidos NO_ASIGNADO en ese rango de 15 minutos
         List<Pedido> pendientesRango = pedidoRepo.findNoAsignadosEnRango(

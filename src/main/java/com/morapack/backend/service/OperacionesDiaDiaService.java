@@ -29,6 +29,7 @@ public class OperacionesDiaDiaService {
     private final RutaAsignadaRepository rutaAsignadaRepository;
     private final AeropuertoRepository aeropuertoRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final TiempoSimuladoService tiempoSimuladoService;
     private boolean activo = false;
     private LocalDateTime inicioOperaciones;
     private List<String> eventosRecientes = new ArrayList<>();
@@ -36,22 +37,28 @@ public class OperacionesDiaDiaService {
     public OperacionesDiaDiaService(PedidoRepository pedidoRepository,
                                     RutaAsignadaRepository rutaAsignadaRepository,
                                     AeropuertoRepository aeropuertoRepository,
-                                    JdbcTemplate jdbcTemplate) {
+                                    JdbcTemplate jdbcTemplate,
+                                    TiempoSimuladoService tiempoSimuladoService) {
         this.pedidoRepository = pedidoRepository;
         this.rutaAsignadaRepository = rutaAsignadaRepository;
         this.aeropuertoRepository = aeropuertoRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.tiempoSimuladoService = tiempoSimuladoService;
     }
 
     /**
-     * Inicia las operaciones día a día
+     * Inicia las operaciones día a día con fecha/hora específica
      */
-    public void iniciar() {
+    public void iniciar(LocalDateTime fechaHoraInicio) {
         this.activo = true;
-        this.inicioOperaciones = LocalDateTime.now(); // Siempre hora actual
+        this.inicioOperaciones = fechaHoraInicio;
         this.eventosRecientes.clear();
-        agregarEvento("🚀 Operaciones día a día iniciadas a las " + this.inicioOperaciones);
-        System.out.println("✅ Operaciones día a día iniciadas: " + this.inicioOperaciones);
+
+        // Inicializar tiempo simulado
+        tiempoSimuladoService.iniciarSimulacion(fechaHoraInicio);
+
+        agregarEvento("🚀 Operaciones día a día iniciadas a las " + fechaHoraInicio);
+        System.out.println("✅ Operaciones día a día iniciadas: " + fechaHoraInicio);
     }
 
     /**
@@ -59,6 +66,7 @@ public class OperacionesDiaDiaService {
      */
     public void detener() {
         this.activo = false;
+        tiempoSimuladoService.detenerSimulacion();
         agregarEvento("⏸️ Operaciones día a día detenidas");
         System.out.println("⏸️ Operaciones día a día detenidas");
     }
@@ -71,9 +79,12 @@ public class OperacionesDiaDiaService {
     public void procesarOperaciones() {
         if (!activo) return;
 
-        LocalDateTime ahora = LocalDateTime.now();
+        // Usar tiempo simulado en lugar de tiempo real
+        LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
         LocalDateTime limite = ahora.plusHours(2);
 
+        // Avanzar el tiempo simulado en 10 segundos para el próximo ciclo
+        tiempoSimuladoService.avanzarTiempo(10);
 
         String fechaStr = ahora.toLocalDate().toString();
         String fechaMananaStr = limite.toLocalDate().toString(); // Puede ser hoy o mañana
@@ -250,7 +261,16 @@ public class OperacionesDiaDiaService {
      * Agrega un evento reciente
      */
     private void agregarEvento(String mensaje) {
-        eventosRecientes.add(LocalDateTime.now().toString().substring(11, 19) + " - " + mensaje);
+        LocalDateTime tiempoActual = tiempoSimuladoService.obtenerTiempoActual();
+
+        // Formatear la hora de forma segura (HH:mm:ss)
+        String horaStr = String.format("%02d:%02d:%02d",
+                tiempoActual.getHour(),
+                tiempoActual.getMinute(),
+                tiempoActual.getSecond()
+        );
+
+        eventosRecientes.add(horaStr + " - " + mensaje);
 
         // Mantener solo últimos 50 eventos
         if (eventosRecientes.size() > 50) {
