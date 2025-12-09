@@ -101,7 +101,15 @@ public class Planificador {
         // Pasar callback si existe
         if (batchCallback != null) {
             grasp.setBatchCallback(batchCallback);
-            grasp.setBatchSize(3000);
+            // ✅ SOLO usar batch por tiempo en SIMULACIONES (cuando hay callback)
+            // Las operaciones día a día NO usan callback, entonces procesan todo de una vez
+            grasp.setUsarBatchPorTiempo(true);
+            grasp.setBatchIntervalMinutes(30);  // Cada 30 minutos de tiempo simulado
+            System.out.println("✅ Batch incremental activado: Cada 30 minutos de tiempo simulado");
+        } else {
+            // Sin callback = operación día a día = procesar todo de una vez
+            grasp.setUsarBatchPorTiempo(false);
+            System.out.println("✅ Modo completo: Procesando todos los pedidos de una vez");
         }
 
         Solucion solucion = grasp.generarSolucion(year);

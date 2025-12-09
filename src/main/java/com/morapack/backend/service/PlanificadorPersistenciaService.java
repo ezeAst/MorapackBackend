@@ -76,14 +76,18 @@ public class PlanificadorPersistenciaService {
         System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
         System.out.println("   (Buscando pedidos atrasados y actuales)");
 
-        // 2) Buscar pedidos NO_ASIGNADO en ese rango de 15 minutos
-        List<Pedido> pendientesRango = pedidoRepo.findNoAsignadosEnRango(
+        // 2) Buscar pedidos NO_ASIGNADO en ese rango PRECISO (incluyendo hora y minuto)
+        List<Pedido> pendientesRango = pedidoRepo.findNoAsignadosEnRangoPreciso(
                 rangoInicio.getYear(),
                 rangoInicio.getMonthValue(),
                 rangoInicio.getDayOfMonth(),
+                rangoInicio.getHour(),
+                rangoInicio.getMinute(),
                 rangoFin.getYear(),
                 rangoFin.getMonthValue(),
-                rangoFin.getDayOfMonth()
+                rangoFin.getDayOfMonth(),
+                rangoFin.getHour(),
+                rangoFin.getMinute()
         );
         if (pendientesRango.isEmpty()) {
             return "Sin pedidos NO_ASIGNADO en rango " + rangoInicio.toLocalTime() + " - " + rangoFin.toLocalTime();

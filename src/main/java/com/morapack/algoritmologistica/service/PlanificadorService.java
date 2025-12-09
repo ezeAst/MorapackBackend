@@ -99,7 +99,7 @@ public class PlanificadorService {
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
 
-        LocalDateTime ahoraLima = LocalDateTime.now(); // Ya está en hora de Lima (UTC-5)
+        LocalDateTime tiempoLimite = startTime; // Ya está en hora de Lima (UTC-5)
 
         List<Vuelo> vuelosDisponibles = vuelos.stream()
                 .filter(v -> {
@@ -114,7 +114,7 @@ public class PlanificadorService {
                     LocalDateTime horaSalidaLima = horaSalidaUTC.plusHours(-5);
 
                     // Comparar en la misma zona horaria
-                    return horaSalidaLima.isAfter(ahoraLima);
+                    return horaSalidaLima.isAfter(tiempoLimite);
                 })
                 .collect(Collectors.toList());
 
