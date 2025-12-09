@@ -19,7 +19,14 @@ public class GRASP {
     private int tamanoRCL;                           // Tamaño de la Lista de Candidatos Restringida
     private Map<String, List<Vuelo>> cacheRutasGlobal;
     private GraspBatchCallback batchCallback;
-    private int batchSize = 3000;
+    private int batchSize = 3000;                    // Fallback: cantidad de pedidos
+    private long batchIntervalMinutes = 30;          // NUEVO: Intervalo de tiempo simulado (minutos)
+    private boolean usarBatchPorTiempo = true;       // NUEVO: Flag para activar batch por tiempo
+
+    // === Métricas del algoritmo ===
+    private List<Long> tiemposArribo = new ArrayList<>();        // TA: Intervalos entre pedidos (minutos)
+    private List<Long> tiemposServicio = new ArrayList<>();      // SA: Tiempo de procesamiento por pedido (ms)
+    private List<Long> saltosConsumo = new ArrayList<>();        // SC: Tiempo desde registro hasta primer vuelo (minutos)
 
     private Map<String, List<Vuelo>> vuelosPorOrigen;
     // === Constructores ===
@@ -53,6 +60,42 @@ public class GRASP {
 
     public void setBatchSize(int size) {
         this.batchSize = size;
+    }
+
+    public void setBatchIntervalMinutes(long minutes) {
+        this.batchIntervalMinutes = minutes;
+    }
+
+    public void setUsarBatchPorTiempo(boolean usar) {
+        this.usarBatchPorTiempo = usar;
+    }
+
+    // === Getters para métricas ===
+    public List<Long> getTiemposArribo() {
+        return new ArrayList<>(tiemposArribo);
+    }
+
+    public List<Long> getTiemposServicio() {
+        return new ArrayList<>(tiemposServicio);
+    }
+
+    public List<Long> getSaltosConsumo() {
+        return new ArrayList<>(saltosConsumo);
+    }
+
+    public double getTAPromedio() {
+        return tiemposArribo.isEmpty() ? 0.0 :
+                tiemposArribo.stream().mapToLong(Long::longValue).average().orElse(0.0);
+    }
+
+    public double getSAPromedio() {
+        return tiemposServicio.isEmpty() ? 0.0 :
+                tiemposServicio.stream().mapToLong(Long::longValue).average().orElse(0.0);
+    }
+
+    public double getSCPromedio() {
+        return saltosConsumo.isEmpty() ? 0.0 :
+                saltosConsumo.stream().mapToLong(Long::longValue).average().orElse(0.0);
     }
 
     public List<Pedido> getPedidos() {
@@ -111,11 +154,34 @@ public class GRASP {
      */
     public Solucion generarSolucion(int year) {
         long startTime = System.currentTimeMillis();
+
+        // ✅ ORDENAR PEDIDOS POR FECHA AL INICIO
+        System.out.println("📦 Ordenando " + pedidos.size() + " pedidos por fecha...");
+        pedidos.sort(Comparator.comparing(Pedido::getFechaPedido));
+        System.out.println("✅ Pedidos ordenados cronológicamente");
+
         Solucion solucion = new Solucion();
         int contadorPedidos = 0;
         int ultimoIndicePersistido = 0;
 
+        // ✅ CONTROL DE BATCH POR TIEMPO
+        LocalDateTime tiempoUltimoBatch = pedidos.isEmpty() ? null : pedidos.get(0).getFechaPedido();
+
+        // ✅ INICIALIZAR CÁLCULO DE MÉTRICAS
+        LocalDateTime fechaPedidoAnterior = null;
+
         for (Pedido pedido : pedidos) {
+            // === INICIO: MEDICIÓN DE TIEMPO DE SERVICIO (SA) ===
+            long inicioServicioPedido = System.currentTimeMillis();
+
+            // === CALCULAR TA (Tiempo de Arribo) ===
+            if (fechaPedidoAnterior != null) {
+                long minutosEntreArribos = Duration.between(fechaPedidoAnterior, pedido.getFechaPedido()).toMinutes();
+                if (minutosEntreArribos >= 0) {  // Evitar negativos por desorden
+                    tiemposArribo.add(minutosEntreArribos);
+                }
+            }
+            fechaPedidoAnterior = pedido.getFechaPedido();
             int cantidadRestante = pedido.getCantidad();
             int intentos = 0;
             int maxIntentos = 5;
@@ -197,13 +263,64 @@ public class GRASP {
 //                        " productos sin asignar después de " + intentos + " intentos.");
             }
 
+            // === CALCULAR SA (Tiempo de Servicio) ===
+            long finServicioPedido = System.currentTimeMillis();
+            long tiempoServicioMs = finServicioPedido - inicioServicioPedido;
+            tiemposServicio.add(tiempoServicioMs);
+
+            // === CALCULAR SC (Salto de Consumo) ===
+            // Buscar el primer vuelo asignado a este pedido
+            LocalDateTime fechaRegistroPedido = pedido.getFechaPedido();
+            LocalDateTime fechaPrimerVuelo = null;
+
+            for (Ruta ruta : solucion.getRutas()) {
+                if (ruta.getPedido() != null &&
+                        ruta.getPedido().getIdCliente().equals(pedido.getIdCliente()) &&
+                        !ruta.getVuelos().isEmpty()) {
+                    LocalDateTime horaSalidaPrimerVuelo = ruta.getVuelos().get(0).getHoraSalida();
+                    if (fechaPrimerVuelo == null || horaSalidaPrimerVuelo.isBefore(fechaPrimerVuelo)) {
+                        fechaPrimerVuelo = horaSalidaPrimerVuelo;
+                    }
+                }
+            }
+
+            if (fechaPrimerVuelo != null) {
+                long saltoConsumoMinutos = Duration.between(fechaRegistroPedido, fechaPrimerVuelo).toMinutes();
+                if (saltoConsumoMinutos >= 0) {  // Validación temporal
+                    saltosConsumo.add(saltoConsumoMinutos);
+                }
+            }
+
             contadorPedidos++;
 
-            // Checkpoint cada batchSize pedidos
-            if (batchCallback != null && contadorPedidos % batchSize == 0) {
-                List<Ruta> rutasNuevas = solucion.getRutas().subList(ultimoIndicePersistido, solucion.getRutas().size());
-                batchCallback.onBatchComplete(new ArrayList<>(rutasNuevas), contadorPedidos, pedidos.size());
-                ultimoIndicePersistido = solucion.getRutas().size();
+            // ✅ CHECKPOINT: Por tiempo simulado O por cantidad (fallback)
+            if (batchCallback != null) {
+                boolean enviarBatch = false;
+
+                if (usarBatchPorTiempo && tiempoUltimoBatch != null) {
+                    // Modo TIEMPO: Enviar cada X minutos simulados
+                    LocalDateTime tiempoActual = pedido.getFechaPedido();
+                    long minutosPasados = Duration.between(tiempoUltimoBatch, tiempoActual).toMinutes();
+
+                    if (minutosPasados >= batchIntervalMinutes) {
+                        enviarBatch = true;
+                        tiempoUltimoBatch = tiempoActual;
+                        System.out.println("📦 Batch por TIEMPO: " + minutosPasados + " minutos simulados | Pedidos: " +
+                                (contadorPedidos - ultimoIndicePersistido));
+                    }
+                } else {
+                    // Modo CANTIDAD: Enviar cada X pedidos (fallback)
+                    if (contadorPedidos % batchSize == 0) {
+                        enviarBatch = true;
+                        System.out.println("📦 Batch por CANTIDAD: " + batchSize + " pedidos");
+                    }
+                }
+
+                if (enviarBatch && ultimoIndicePersistido < solucion.getRutas().size()) {
+                    List<Ruta> rutasNuevas = solucion.getRutas().subList(ultimoIndicePersistido, solucion.getRutas().size());
+                    batchCallback.onBatchComplete(new ArrayList<>(rutasNuevas), contadorPedidos, pedidos.size());
+                    ultimoIndicePersistido = solucion.getRutas().size();
+                }
             }
         }
 
@@ -219,7 +336,77 @@ public class GRASP {
         System.out.println("\n⏱️ TIEMPO DE EJECUCIÓN GRASP: " + duration + " ms (" +
                 (duration / 1000.0) + " segundos)");
 
+        // ✅ MOSTRAR MÉTRICAS DEL ALGORITMO
+        mostrarMetricasAlgoritmo();
+
         return solucion;
+    }
+
+    /**
+     * Calcula y muestra las métricas del algoritmo (TA, SA, SC)
+     */
+    private void mostrarMetricasAlgoritmo() {
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("📊 MÉTRICAS DEL ALGORITMO");
+        System.out.println("=".repeat(60));
+
+        // TA - Tiempo de Arribo (promedio de intervalos entre pedidos)
+        if (!tiemposArribo.isEmpty()) {
+            double taPromedio = tiemposArribo.stream()
+                    .mapToLong(Long::longValue)
+                    .average()
+                    .orElse(0.0);
+
+            long taMin = tiemposArribo.stream().mapToLong(Long::longValue).min().orElse(0);
+            long taMax = tiemposArribo.stream().mapToLong(Long::longValue).max().orElse(0);
+
+            System.out.println("\n📥 TA (Tiempo de Arribo):");
+            System.out.println("   Promedio: " + String.format("%.2f", taPromedio) + " minutos");
+            System.out.println("   Mínimo:   " + taMin + " minutos");
+            System.out.println("   Máximo:   " + taMax + " minutos");
+            System.out.println("   Total de intervalos medidos: " + tiemposArribo.size());
+        }
+
+        // SA - Tiempo de Servicio (tiempo de procesamiento por pedido)
+        if (!tiemposServicio.isEmpty()) {
+            double saPromedio = tiemposServicio.stream()
+                    .mapToLong(Long::longValue)
+                    .average()
+                    .orElse(0.0);
+
+            long saMin = tiemposServicio.stream().mapToLong(Long::longValue).min().orElse(0);
+            long saMax = tiemposServicio.stream().mapToLong(Long::longValue).max().orElse(0);
+
+            System.out.println("\n⚙️ SA (Tiempo de Servicio):");
+            System.out.println("   Promedio: " + String.format("%.2f", saPromedio) + " ms");
+            System.out.println("   Mínimo:   " + saMin + " ms");
+            System.out.println("   Máximo:   " + saMax + " ms");
+            System.out.println("   Total de pedidos procesados: " + tiemposServicio.size());
+        }
+
+        // SC - Salto de Consumo (tiempo desde registro hasta primer vuelo)
+        if (!saltosConsumo.isEmpty()) {
+            double scPromedio = saltosConsumo.stream()
+                    .mapToLong(Long::longValue)
+                    .average()
+                    .orElse(0.0);
+
+            long scMin = saltosConsumo.stream().mapToLong(Long::longValue).min().orElse(0);
+            long scMax = saltosConsumo.stream().mapToLong(Long::longValue).max().orElse(0);
+
+            System.out.println("\n🚀 SC (Salto de Consumo):");
+            System.out.println("   Promedio: " + String.format("%.2f", scPromedio) + " minutos");
+            System.out.println("   Mínimo:   " + scMin + " minutos");
+            System.out.println("   Máximo:   " + scMax + " minutos");
+            System.out.println("   Total de saltos medidos: " + saltosConsumo.size());
+        }
+
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("📌 INTERPRETACIÓN:");
+        System.out.println("   • TA: Cada cuánto tiempo llegan pedidos al sistema");
+        System.out.println("   • SA: Cuánto demora el algoritmo en procesar cada pedido");
+        System.out.println("   • SC: Cuánto tiempo pasa desde el registro hasta el primer vuelo");
+        System.out.println("=".repeat(60) + "\n");
     }
 
     private int determinarPlazo(Aeropuerto sede, Aeropuerto destino) {

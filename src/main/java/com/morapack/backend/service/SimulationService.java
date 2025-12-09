@@ -172,7 +172,6 @@ public class SimulationService {
     }
 
     // Nuevo método para procesar batches incrementales
-// Nuevo método para procesar batches incrementales
     private void procesarRutasBatch(String simulationId, List<Ruta> rutasBatch, LocalDateTime startTime) {
         // Contar pedidos únicos en este batch
         Set<String> pedidosUnicos = new HashSet<>();

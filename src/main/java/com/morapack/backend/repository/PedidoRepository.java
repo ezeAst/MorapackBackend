@@ -78,6 +78,37 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
     );
 
     /**
+     * ✅ NUEVO: Busca pedidos NO_ASIGNADO en un rango PRECISO de fecha/hora/minuto
+     * Para operaciones día a día con ventana de 15 minutos
+     *
+     * Ejemplo: Rango de 20:45 a 21:00 del 01/12/2025
+     * Solo traerá pedidos entre esas horas exactas, no todo el día
+     */
+    @Query("SELECT p FROM Pedido p WHERE p.estado = 'NO_ASIGNADO' " +
+            "AND (" +
+            // Comparación usando fecha/hora como número: YYYYMMDDHHMM
+            "   (p.anho * 100000000 + p.mes * 1000000 + p.dia * 10000 + p.hora * 100 + p.minuto) " +
+            "   BETWEEN " +
+            "   (:anhoInicio * 100000000 + :mesInicio * 1000000 + :diaInicio * 10000 + :horaInicio * 100 + :minutoInicio) " +
+            "   AND " +
+            "   (:anhoFin * 100000000 + :mesFin * 1000000 + :diaFin * 10000 + :horaFin * 100 + :minutoFin) " +
+            ") " +
+            "ORDER BY p.anho, p.mes, p.dia, p.hora, p.minuto " +
+            "LIMIT 70000")
+    List<Pedido> findNoAsignadosEnRangoPreciso(
+            @Param("anhoInicio") int anhoInicio,
+            @Param("mesInicio") int mesInicio,
+            @Param("diaInicio") int diaInicio,
+            @Param("horaInicio") int horaInicio,
+            @Param("minutoInicio") int minutoInicio,
+            @Param("anhoFin") int anhoFin,
+            @Param("mesFin") int mesFin,
+            @Param("diaFin") int diaFin,
+            @Param("horaFin") int horaFin,
+            @Param("minutoFin") int minutoFin
+    );
+
+    /**
      *
      * Solo trae los que tienen hora_entrega registrada
      */
