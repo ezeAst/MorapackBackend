@@ -1,19 +1,44 @@
 package com.morapack.algoritmologistica.algorithm.models;
 
+import jakarta.persistence.*;
+
 import java.time.LocalDateTime;
 
+
+@Entity
+@Table(name = "vuelo")
 public class Vuelo {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
     // === Atributos ===
+    @Transient
     private Aeropuerto aeropuertoOrigen;   // Aeropuerto de salida
+    @Transient
     private Aeropuerto aeropuertoDestino;  // Aeropuerto de llegada
+
+    @Column(name = "hora_salida")
     private LocalDateTime horaSalida;          // Hora de salida (zona horaria de origen)
+    @Column(name = "hora_llegada")
     private LocalDateTime horaLlegada;         // Hora de llegada (zona horaria de destino)
+    @Column(name = "capacidad")
     private int capacidadMaxima;           // Capacidad máxima del avión
+
+    @Column(name = "capacidad_actual")
     private int capacidadActual;           // Capacidad ocupada actualmente
+
+    @Column(name = "origen")
+    private String origen;
+
+    @Column(name = "destino")
+    private String destino;
 
     // === Constructores ===
     public Vuelo() {
+        this.capacidadActual=0;
     }
 
     public Vuelo(Aeropuerto aeropuertoOrigen, Aeropuerto aeropuertoDestino,
@@ -21,6 +46,15 @@ public class Vuelo {
                  int capacidadMaxima) {
         this.aeropuertoOrigen = aeropuertoOrigen;
         this.aeropuertoDestino = aeropuertoDestino;
+        this.horaSalida = horaSalida;
+        this.horaLlegada = horaLlegada;
+        this.capacidadMaxima = capacidadMaxima;
+        this.capacidadActual = 0;
+    }
+
+    public Vuelo(String destino, String origen, LocalDateTime horaSalida, LocalDateTime horaLlegada, int capacidadMaxima) {
+        this.destino = destino;
+        this.origen = origen;
         this.horaSalida = horaSalida;
         this.horaLlegada = horaLlegada;
         this.capacidadMaxima = capacidadMaxima;
@@ -74,6 +108,22 @@ public class Vuelo {
 
     public void setCapacidadActual(int capacidadActual) {
         this.capacidadActual = capacidadActual;
+    }
+
+    public String getOrigen() {
+        return origen;
+    }
+
+    public void setOrigen(String origen) {
+        this.origen = origen;
+    }
+
+    public String getDestino() {
+        return destino;
+    }
+
+    public void setDestino(String destino) {
+        this.destino = destino;
     }
 
     // === Métodos funcionales ===
