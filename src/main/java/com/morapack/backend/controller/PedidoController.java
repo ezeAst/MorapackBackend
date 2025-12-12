@@ -4,16 +4,19 @@ package com.morapack.backend.controller;
 import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import com.morapack.backend.repository.PedidoRepository;
+import com.morapack.backend.service.PedidoService;
 import com.morapack.backend.service.Pedidobatchservice;
 
 import com.morapack.backend.service.Pedidobatchservice;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.awt.print.Pageable;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -21,6 +24,8 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/pedidos")
 @CrossOrigin(origins = "*")
 public class PedidoController {
+
+    private final PedidoService pedidoService;
 
     @Autowired
     private PedidoRepository pedidoRepository;
@@ -30,6 +35,10 @@ public class PedidoController {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    public PedidoController(PedidoService pedidoService) {
+        this.pedidoService = pedidoService;
+    }
 
     @GetMapping
     public List<Pedido> listar() {
@@ -92,6 +101,47 @@ public class PedidoController {
         body.put("errores", 0);
 
         return ResponseEntity.ok(body);
+    }
+
+    @PostMapping("/insertar")
+    public ResponseEntity<?> insertarPedido(@RequestBody Map<String, Object> payload) {
+
+        if (!payload.containsKey("id_cliente") ||
+                !payload.containsKey("cantidad") ||
+                !payload.containsKey("aeropuerto_destino") ||
+                !payload.containsKey("created_at")) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "mensaje", "Faltan campos: id_cliente, cantidad, aeropuerto_destino, created_at"
+            ));
+        }
+
+        Pedido creado = pedidoService.crearPedidoDesdePayload(payload);
+
+        return ResponseEntity.ok(Map.of(
+                "id", creado.getId(),
+                "mensaje", "Pedido creado correctamente"
+        ));
+    }
+
+    @GetMapping("/recientes")
+    public ResponseEntity<?> recientes(@RequestParam(defaultValue = "5") int limit) {
+        if (limit <= 0) limit = 5;
+        if (limit > 50) limit = 50;
+
+        List<Object[]> rows = pedidoRepository.findRecientesSimple(limit);
+
+        List<Map<String, Object>> resp = rows.stream()
+                .map(r -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("id", ((Number) r[0]).longValue());
+                    m.put("id_cliente", (String) r[1]);
+                    m.put("aeropuerto_destino", (String) r[2]);
+                    m.put("cantidad", ((Number) r[3]).intValue());
+                    return m;
+                })
+                .collect(Collectors.toList()); // ✅ Java 8/11 compatible
+
+        return ResponseEntity.ok(resp);
     }
 
 }

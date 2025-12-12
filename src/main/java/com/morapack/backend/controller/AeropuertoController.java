@@ -1,5 +1,6 @@
 package com.morapack.backend.controller;
 
+import com.morapack.algoritmologistica.algorithm.models.Aeropuerto;
 import com.morapack.backend.entity.AeropuertoEntity;
 import com.morapack.backend.repository.AeropuertoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -103,5 +104,18 @@ public class AeropuertoController {
         .toList();
     return ResponseEntity.ok(lista);
     }
+
+    @GetMapping("/destinos")
+    public List<AeropuertoEntity> listarDestinos() {
+        return aeropuertoRepository.findAll().stream()
+                // puedes filtrar solo aeropuertos destino si quieres
+                .map(a -> new AeropuertoEntity(
+                        a.getNombre(),        // o como se llame el campo
+                        a.getCodigo(),    // "EGLL", "LEMD", etc.
+                        a.getHusoHorario()      // ej. -5, 0, +1
+                ))
+                .toList();
+    }
+
 
 }
