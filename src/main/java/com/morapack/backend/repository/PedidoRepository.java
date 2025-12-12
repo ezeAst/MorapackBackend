@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.awt.print.Pageable;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,6 +55,12 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
      */
     @Query("SELECT MAX(p.id) FROM Pedido p")
     Optional<Long> findMaxId();
+
+    /*@Query("SELECT p FROM Pedido p ORDER BY p.id DESC")
+    List<Pedido> findRecientes(Pageable pageable);*/
+
+    @Query(value = "SELECT id, id_cliente, aeropuerto_destino, cantidad FROM pedido ORDER BY id DESC LIMIT :limit", nativeQuery = true)
+    List<Object[]> findRecientesSimple(@Param("limit") int limit);
 
     /**
      *
@@ -232,4 +239,7 @@ public interface PedidoRepository extends JpaRepository<Pedido, Long> {
             @Param("fecha") String fecha,
             @Param("hora") String hora
     );
+
+
+
 }
