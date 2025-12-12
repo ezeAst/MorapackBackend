@@ -47,6 +47,7 @@ public class SimulationService {
     private final Map<String, Long> lastUpdateSeconds = new ConcurrentHashMap<>();
     private final Map<String, Integer> simulationProcessedOrders = new ConcurrentHashMap<>();
     private final Map<String, Solucion> simulationPartialSolution = new ConcurrentHashMap<>();
+    private final Map<String, Solucion> simulationSolutions = new ConcurrentHashMap<>(); // Almacenar solución completa
     // Junto con los otros Maps
     private final Map<String, Boolean> simulationPlanningStatus = new ConcurrentHashMap<>();
     // ✅ CONSTRUCTOR - Actualizar este también
@@ -145,6 +146,7 @@ public class SimulationService {
             try {
                 Solucion solucion = planificador.ejecutarPlanificacion(anho);
                 simulation.setSolucion(solucion);
+                simulationSolutions.put(simulationId, solucion); // ← GUARDAR LA SOLUCIÓN
                 // NO llamar a simulation.start() aquí - ya está corriendo
                 simulationPlanningStatus.put(simulationId, false);
                 System.out.println("✅ Planificación completa - Fitness: " + solucion.getFitness());
@@ -432,15 +434,15 @@ public class SimulationService {
     ) {
         // Iterar sobre cada pedido activo
         Iterator<OrderSnapshot> iterator = orders.iterator();
-        
+
         while (iterator.hasNext()) {
             OrderSnapshot order = iterator.next();
-            
+
             // Verificar si el pedido está programado para este momento
             LocalDateTime orderTime = currentTime.withDayOfMonth(order.getDay())
                     .withHour(order.getHour())
                     .withMinute(order.getMinute());
-            
+
             if (currentTime.isBefore(orderTime)) {
                 // El pedido aún no ha llegado
                 order.setStatus("pending");
@@ -450,8 +452,8 @@ public class SimulationService {
 
             // Verificar si el pedido ha sido asignado a algún vuelo en la solución
             boolean isAssigned = solucion.getRutas().stream()
-                    .anyMatch(ruta -> ruta.getPedido() != null && 
-                             ruta.getPedido().getIdCliente().equals(order.getClientId()));
+                    .anyMatch(ruta -> ruta.getPedido() != null &&
+                            ruta.getPedido().getIdCliente().equals(order.getClientId()));
 
             if (!isAssigned) {
                 // El pedido no ha sido asignado a ningún vuelo
@@ -472,7 +474,7 @@ public class SimulationService {
 
             // Verificar si el pedido ha sido entregado
             boolean isDelivered = solucion.getRutas().stream()
-                    .filter(ruta -> ruta.getPedido() != null && 
+                    .filter(ruta -> ruta.getPedido() != null &&
                             ruta.getPedido().getIdCliente().equals(order.getClientId()))
                     .allMatch(ruta -> ruta.getPedido().getCantidadCumplida() >= ruta.getPedido().getCantidad());
 
@@ -484,7 +486,7 @@ public class SimulationService {
 
                 // Evento: entrega al cliente (primera vez)
                 simulation.addEvent("El pedido " + order.getOrderId() + " ya se entregó", "ORDER_DELIVERED");
-                
+
                 // Mover el pedido a la lista de entregados
                 iterator.remove();
                 delivered.add(order);
@@ -506,6 +508,117 @@ public class SimulationService {
         }
 
         return simulations;
+    }
+
+    /**
+     * Genera un reporte completo de la solución en formato texto
+     */
+    public String generateSolutionReport(String simulationId) {
+        Solucion solucion = simulationSolutions.get(simulationId);
+
+        if (solucion == null) {
+            return null;
+        }
+
+        StringBuilder report = new StringBuilder();
+
+        // ========== ENCABEZADO ==========
+        report.append("═══════════════════════════════════════════════════════════════════════\n");
+        report.append("                    REPORTE DE PLANIFICACIÓN MORAPACK                    \n");
+        report.append("═══════════════════════════════════════════════════════════════════════\n");
+        report.append("\n");
+        report.append("Simulación ID: ").append(simulationId).append("\n");
+        report.append("Fecha de generación: ").append(LocalDateTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))).append("\n");
+        report.append("\n");
+
+        // ========== RESUMEN GENERAL ==========
+        report.append("───────────────────────────────────────────────────────────────────────\n");
+        report.append("RESUMEN GENERAL\n");
+        report.append("───────────────────────────────────────────────────────────────────────\n");
+        report.append(String.format("Total de rutas planificadas: %d\n", solucion.getRutas().size()));
+        report.append(String.format("Fitness de la solución: %.2f\n", solucion.getFitness()));
+
+        // Calcular estadísticas
+        int totalVuelos = 0;
+        int totalPedidos = 0;
+        int pedidosCumplePlazo = 0;
+
+        for (Ruta ruta : solucion.getRutas()) {
+            totalVuelos += ruta.getVuelos().size();
+            if (ruta.getPedido() != null) {
+                totalPedidos++;
+                if (ruta.isCumplePlazo()) {
+                    pedidosCumplePlazo++;
+                }
+            }
+        }
+
+        report.append(String.format("Total de pedidos: %d\n", totalPedidos));
+        report.append(String.format("Total de vuelos utilizados: %d\n", totalVuelos));
+        report.append(String.format("Pedidos entregados a tiempo: %d (%.1f%%)\n",
+                pedidosCumplePlazo, (pedidosCumplePlazo * 100.0 / totalPedidos)));
+        report.append("\n\n");
+
+        // ========== DETALLE DE RUTAS ==========
+        report.append("═══════════════════════════════════════════════════════════════════════\n");
+        report.append("DETALLE DE RUTAS POR PEDIDO\n");
+        report.append("═══════════════════════════════════════════════════════════════════════\n");
+        report.append("\n");
+
+        int rutaNum = 1;
+        for (Ruta ruta : solucion.getRutas()) {
+            Pedido pedido = ruta.getPedido();
+
+            if (pedido == null) continue;
+
+            report.append("───────────────────────────────────────────────────────────────────────\n");
+            report.append(String.format("RUTA #%d\n", rutaNum++));
+            report.append("───────────────────────────────────────────────────────────────────────\n");
+
+            // Información del pedido
+            report.append("\n📦 INFORMACIÓN DEL PEDIDO:\n");
+            report.append(String.format("  • ID Cliente: %s\n", pedido.getIdCliente()));
+            report.append(String.format("  • Cantidad: %d kg\n", pedido.getCantidad()));
+            report.append(String.format("  • Fecha pedido: %02d/%02d a las %02d:%02d\n",
+                    pedido.getDia(), pedido.getMes(), pedido.getHora(), pedido.getMinuto()));
+            report.append(String.format("  • Origen: %s\n", ruta.getSedeOrigen().getNombre()));
+            report.append(String.format("  • Destino: %s\n", ruta.getDestinoFinal().getNombre()));
+            report.append(String.format("  • Cumple plazo: %s\n", ruta.isCumplePlazo() ? "✓ SÍ" : "✗ NO"));
+
+            // Información de vuelos
+            if (!ruta.getVuelos().isEmpty()) {
+                report.append("\n✈️  VUELOS ASIGNADOS:\n");
+
+                for (int i = 0; i < ruta.getVuelos().size(); i++) {
+                    Vuelo vuelo = ruta.getVuelos().get(i);
+
+                    report.append(String.format("\n  Vuelo %d:\n", i + 1));
+                    report.append(String.format("    Origen:      %s (%s)\n",
+                            vuelo.getAeropuertoOrigen().getNombre(),
+                            vuelo.getAeropuertoOrigen().getCodigo()));
+                    report.append(String.format("    Destino:     %s (%s)\n",
+                            vuelo.getAeropuertoDestino().getNombre(),
+                            vuelo.getAeropuertoDestino().getCodigo()));
+                    report.append(String.format("    Salida:      %s\n",
+                            vuelo.getHoraSalida().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))));
+                    report.append(String.format("    Llegada:     %s\n",
+                            vuelo.getHoraLlegada().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))));
+                    report.append(String.format("    Capacidad:   %d / %d kg (%.1f%% ocupación)\n",
+                            vuelo.getCapacidadActual(), vuelo.getCapacidadMaxima(),
+                            (vuelo.getCapacidadActual() * 100.0 / vuelo.getCapacidadMaxima())));
+                }
+            }
+
+            report.append("\n");
+        }
+
+        // ========== PIE DE PÁGINA ==========
+        report.append("═══════════════════════════════════════════════════════════════════════\n");
+        report.append("                         FIN DEL REPORTE                               \n");
+        report.append("═══════════════════════════════════════════════════════════════════════\n");
+
+        return report.toString();
     }
 
 

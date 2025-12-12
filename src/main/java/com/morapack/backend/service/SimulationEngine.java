@@ -18,6 +18,7 @@ public class SimulationEngine {
 
     private final AeropuertoRepository aeropuertoRepository;
     private final Map<String, double[]> coordinatesCache = new HashMap<>();
+    private Solucion currentSolucion; // Guardar referencia a la solución actual
 
 
     public SimulationEngine(AeropuertoRepository aeropuertoRepository) {
@@ -50,6 +51,7 @@ public class SimulationEngine {
     }
 
     public List<FlightSnapshot> generateInitialFlightSnapshots(Solucion solucion, LocalDateTime startTime, int startId) {
+        this.currentSolucion = solucion; // Guardar referencia a la solución
         List<FlightSnapshot> snapshots = new ArrayList<>();
         Set<Vuelo> vuelosUnicos = new HashSet<>();
 
@@ -129,6 +131,10 @@ public class SimulationEngine {
         snapshot.setProgressPercentage(0.0);
         snapshot.setCurrentLat(coordOrigen[1]);
         snapshot.setCurrentLng(coordOrigen[0]);
+
+        // Agregar los pedidos que lleva este vuelo
+        List<String> orderIds = getOrdersInFlight(vuelo);
+        snapshot.setOrderIds(orderIds);
 
         return snapshot;
     }
@@ -338,6 +344,40 @@ public class SimulationEngine {
         return vuelo.getAeropuertoOrigen().getCodigo().substring(0, 2) + "-" +
                 vuelo.getAeropuertoDestino().getCodigo().substring(0, 2) +
                 vuelo.getHoraSalida().getDayOfMonth();
+    }
+
+    /**
+     * Obtiene los IDs de los pedidos que están en un vuelo específico
+     */
+    private List<String> getOrdersInFlight(Vuelo vuelo) {
+        List<String> orderIds = new ArrayList<>();
+
+        if (vuelo == null || currentSolucion == null) {
+            return orderIds;
+        }
+
+        // Recorrer todas las rutas de la solución
+        for (Ruta ruta : currentSolucion.getRutas()) {
+            if (ruta.getPedido() == null) continue;
+
+            // Verificar si este vuelo está en la ruta
+            for (Vuelo vueloEnRuta : ruta.getVuelos()) {
+                // Comparar vuelos por origen, destino y hora de salida
+                boolean mismoOrigen = vueloEnRuta.getAeropuertoOrigen().getCodigo()
+                        .equals(vuelo.getAeropuertoOrigen().getCodigo());
+                boolean mismoDestino = vueloEnRuta.getAeropuertoDestino().getCodigo()
+                        .equals(vuelo.getAeropuertoDestino().getCodigo());
+                boolean mismaHora = vueloEnRuta.getHoraSalida().equals(vuelo.getHoraSalida());
+
+                if (mismoOrigen && mismoDestino && mismaHora) {
+                    // Este pedido está en este vuelo
+                    orderIds.add(ruta.getPedido().getIdCliente());
+                    break; // Ya encontramos este pedido en este vuelo, pasar al siguiente
+                }
+            }
+        }
+
+        return orderIds;
     }
 
     /**
