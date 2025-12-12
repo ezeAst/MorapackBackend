@@ -11,9 +11,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import java.nio.charset.StandardCharsets;
+import java.time.format.DateTimeFormatter;
 
 @RestController
 @RequestMapping("/api/simulations")
@@ -102,6 +109,36 @@ public class SimulationController {
                 "service", "Simulation Service",
                 "version", "1.0.0"
         ));
+    }
+
+    /**
+     * Endpoint para descargar el reporte completo de la solución en formato TXT
+     */
+    @GetMapping("/{simulationId}/solution-report")
+    public ResponseEntity<Resource> downloadSolutionReport(@PathVariable String simulationId) {
+        try {
+            String report = simulationService.generateSolutionReport(simulationId);
+
+            if (report == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            ByteArrayResource resource = new ByteArrayResource(report.getBytes(StandardCharsets.UTF_8));
+
+            String filename = "solucion-" + simulationId + "-" +
+                    LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss")) +
+                    ".txt";
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .contentLength(resource.contentLength())
+                    .body(resource);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
 

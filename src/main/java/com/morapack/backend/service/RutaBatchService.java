@@ -1,5 +1,8 @@
 package com.morapack.backend.service;
 
+import com.morapack.algoritmologistica.algorithm.models.Ruta;
+import com.morapack.algoritmologistica.algorithm.models.Vuelo;
+import com.morapack.algoritmologistica.algorithm.solver.Solucion;
 import com.morapack.backend.entity.RutaAsignada;
 import com.morapack.backend.entity.RutaTramo;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -104,5 +108,36 @@ public class RutaBatchService {
         if (!firstTramo) {
             jdbcTemplate.update(sqlTramos.toString());
         }
+    }
+
+    private List<String> getOrdersInFlight(Vuelo vuelo, Solucion solucion) {
+        List<String> orderIds = new ArrayList<>();
+
+        if (vuelo == null || solucion == null) {
+            return orderIds;
+        }
+
+        // Recorrer todas las rutas de la solución
+        for (Ruta ruta : solucion.getRutas()) {
+            if (ruta.getPedido() == null) continue;
+
+            // Verificar si este vuelo está en la ruta
+            for (Vuelo vueloEnRuta : ruta.getVuelos()) {
+                // Comparar vuelos por origen, destino y hora de salida
+                boolean mismoOrigen = vueloEnRuta.getAeropuertoOrigen().getCodigo()
+                        .equals(vuelo.getAeropuertoOrigen().getCodigo());
+                boolean mismoDestino = vueloEnRuta.getAeropuertoDestino().getCodigo()
+                        .equals(vuelo.getAeropuertoDestino().getCodigo());
+                boolean mismaHora = vueloEnRuta.getHoraSalida().equals(vuelo.getHoraSalida());
+
+                if (mismoOrigen && mismoDestino && mismaHora) {
+                    // Este pedido está en este vuelo
+                    orderIds.add(ruta.getPedido().getIdCliente());
+                    break; // Ya encontramos este pedido en este vuelo, pasar al siguiente
+                }
+            }
+        }
+
+        return orderIds;
     }
 }

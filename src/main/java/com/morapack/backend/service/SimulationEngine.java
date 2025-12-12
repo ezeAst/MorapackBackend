@@ -18,6 +18,7 @@ public class SimulationEngine {
 
     private final AeropuertoRepository aeropuertoRepository;
     private final Map<String, double[]> coordinatesCache = new HashMap<>();
+    private Solucion currentSolucion; // Guardar referencia a la solución actual
 
 
     public SimulationEngine(AeropuertoRepository aeropuertoRepository) {
@@ -50,6 +51,7 @@ public class SimulationEngine {
     }
 
     public List<FlightSnapshot> generateInitialFlightSnapshots(Solucion solucion, LocalDateTime startTime, int startId) {
+        this.currentSolucion = solucion; // Guardar referencia a la solución
         List<FlightSnapshot> snapshots = new ArrayList<>();
         Set<Vuelo> vuelosUnicos = new HashSet<>();
 
@@ -57,13 +59,33 @@ public class SimulationEngine {
             vuelosUnicos.addAll(ruta.getVuelos());
         }
 
+        // Códigos de los 3 almacenes principales
+        final Set<String> ALMACENES_PRINCIPALES = Set.of("SPIM", "EBCI", "UBBB"); // Lima, Brussels, Baku
+        final long HORAS_RESTRICCION = 12;
+
         int flightIdCounter = startId;
         for (Vuelo vuelo : vuelosUnicos) {
-            FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime); // ← SOLO este incremento
+            FlightSnapshot snapshot = createFlightSnapshot(vuelo, flightIdCounter++, startTime);
 
             // Solo agregar si sale después del startTime
             if (!snapshot.getDepartureTime().isBefore(startTime)) {
-                snapshots.add(snapshot);
+                // Calcular cuántas horas han pasado desde el inicio de la simulación
+                Duration tiempoDesdeInicio = Duration.between(startTime, snapshot.getDepartureTime());
+                long horasDesdeInicio = tiempoDesdeInicio.toHours();
+
+                // Si estamos en las primeras 12 horas
+                if (horasDesdeInicio < HORAS_RESTRICCION) {
+                    String codigoOrigen = vuelo.getAeropuertoOrigen().getCodigo();
+
+                    // Solo agregar si sale de un almacén principal
+                    if (ALMACENES_PRINCIPALES.contains(codigoOrigen)) {
+                        snapshots.add(snapshot);
+                    }
+                    // Si NO sale de almacén principal, simplemente no lo agregamos (se ignora)
+                } else {
+                    // Después de 12 horas, agregar todos los vuelos
+                    snapshots.add(snapshot);
+                }
             }
         }
 
@@ -129,6 +151,10 @@ public class SimulationEngine {
         snapshot.setProgressPercentage(0.0);
         snapshot.setCurrentLat(coordOrigen[1]);
         snapshot.setCurrentLng(coordOrigen[0]);
+
+        // Agregar los pedidos que lleva este vuelo
+        List<String> orderIds = getOrdersInFlight(vuelo);
+        snapshot.setOrderIds(orderIds);
 
         return snapshot;
     }
@@ -341,6 +367,40 @@ public class SimulationEngine {
     }
 
     /**
+     * Obtiene los IDs de los pedidos que están en un vuelo específico
+     */
+    private List<String> getOrdersInFlight(Vuelo vuelo) {
+        List<String> orderIds = new ArrayList<>();
+
+        if (vuelo == null || currentSolucion == null) {
+            return orderIds;
+        }
+
+        // Recorrer todas las rutas de la solución
+        for (Ruta ruta : currentSolucion.getRutas()) {
+            if (ruta.getPedido() == null) continue;
+
+            // Verificar si este vuelo está en la ruta
+            for (Vuelo vueloEnRuta : ruta.getVuelos()) {
+                // Comparar vuelos por origen, destino y hora de salida
+                boolean mismoOrigen = vueloEnRuta.getAeropuertoOrigen().getCodigo()
+                        .equals(vuelo.getAeropuertoOrigen().getCodigo());
+                boolean mismoDestino = vueloEnRuta.getAeropuertoDestino().getCodigo()
+                        .equals(vuelo.getAeropuertoDestino().getCodigo());
+                boolean mismaHora = vueloEnRuta.getHoraSalida().equals(vuelo.getHoraSalida());
+
+                if (mismoOrigen && mismoDestino && mismaHora) {
+                    // Este pedido está en este vuelo
+                    orderIds.add(ruta.getPedido().getIdCliente());
+                    break; // Ya encontramos este pedido en este vuelo, pasar al siguiente
+                }
+            }
+        }
+
+        return orderIds;
+    }
+
+    /**
      * Convierte coordenadas lat/lng a proyección Web Mercator (EPSG:3857)
      */
     private double[] latLngToMercator(double lng, double lat) {
@@ -383,12 +443,151 @@ public class SimulationEngine {
 
             snapshot.setProductsInTransit(0);
             snapshot.setProductsAtDestination(0);
+
+            // ✨ Agregar vuelos salientes
+            List<Map<String, Object>> outgoingFlights = getOutgoingFlights(
+                    aeropuerto.getCodigo(),
+                    aeropuerto.getNombre(),
+                    allFlights,
+                    currentSimulatedTime
+            );
+            snapshot.setOutgoingFlights(outgoingFlights);
+
+            // ✨ Agregar pedidos próximos a salir
+            List<Map<String, Object>> outgoingOrders = getOutgoingOrders(
+                    aeropuerto.getCodigo(),
+                    aeropuerto.getNombre(),
+                    allFlights,
+                    solucion,
+                    currentSimulatedTime
+            );
+            snapshot.setOutgoingOrders(outgoingOrders);
+
             snapshot.updateStatus();
 
             snapshots.add(snapshot);
         }
 
         return snapshots;
+    }
+
+    /**
+     * Obtiene los vuelos que salen de un aeropuerto específico
+     * Solo muestra vuelos programados (scheduled) que aún no han despegado
+     */
+    private List<Map<String, Object>> getOutgoingFlights(
+            String airportCode,
+            String airportName,
+            List<FlightSnapshot> allFlights,
+            LocalDateTime currentTime
+    ) {
+        List<Map<String, Object>> outgoingFlights = new ArrayList<>();
+
+        for (FlightSnapshot flight : allFlights) {
+            // Verificar si el vuelo sale de este aeropuerto
+            boolean matchesOrigin = flight.getOrigin().equals(airportName) ||
+                    flight.getOrigin().contains(airportCode);
+
+            if (matchesOrigin) {
+                // Solo incluir vuelos programados que aún no han despegado
+                String status = flight.getStatus();
+                boolean isScheduled = status.equals("scheduled");
+                boolean hasNotDeparted = flight.getDepartureTime().isAfter(currentTime);
+
+                if (isScheduled && hasNotDeparted) {
+                    Map<String, Object> flightInfo = new HashMap<>();
+                    flightInfo.put("id", flight.getId());
+                    flightInfo.put("flightCode", flight.getFlightCode());
+                    flightInfo.put("destination", flight.getDestination());
+                    flightInfo.put("departureTime", flight.getDepartureTime().toString());
+                    flightInfo.put("arrivalTime", flight.getArrivalTime().toString());
+                    flightInfo.put("status", status);
+                    flightInfo.put("packages", flight.getPackages());
+                    flightInfo.put("capacity", flight.getCapacity());
+                    flightInfo.put("occupancyPercentage",
+                            flight.getCapacity() > 0 ? (flight.getPackages() * 100.0 / flight.getCapacity()) : 0.0
+                    );
+
+                    outgoingFlights.add(flightInfo);
+                }
+            }
+        }
+
+        // Ordenar por hora de salida (más próximos primero)
+        outgoingFlights.sort((f1, f2) -> {
+            String time1 = (String) f1.get("departureTime");
+            String time2 = (String) f2.get("departureTime");
+            return time1.compareTo(time2);
+        });
+
+        // Limitar a 20 para tener margen (frontend mostrará 3)
+        if (outgoingFlights.size() > 20) {
+            outgoingFlights = outgoingFlights.subList(0, 20);
+        }
+
+        return outgoingFlights;
+    }
+
+    /**
+     * Obtiene los pedidos que están esperando salir de un aeropuerto específico
+     * Muestra pedidos cuyos vuelos están programados pero no han despegado
+     */
+    private List<Map<String, Object>> getOutgoingOrders(
+            String airportCode,
+            String airportName,
+            List<FlightSnapshot> allFlights,
+            Solucion solucion,
+            LocalDateTime currentTime
+    ) {
+        List<Map<String, Object>> outgoingOrders = new ArrayList<>();
+
+        if (solucion == null) {
+            return outgoingOrders;
+        }
+
+        // Recorrer todas las rutas de la solución
+        for (Ruta ruta : solucion.getRutas()) {
+            if (ruta.getVuelos().isEmpty() || ruta.getPedido() == null) continue;
+
+            Vuelo primerVuelo = ruta.getVuelos().get(0);
+            String origenVuelo = primerVuelo.getAeropuertoOrigen().getNombre();
+            String codigoOrigen = primerVuelo.getAeropuertoOrigen().getCodigo();
+
+            // Verificar si el primer vuelo sale de este aeropuerto
+            boolean matchesOrigin = origenVuelo.equals(airportName) || codigoOrigen.equals(airportCode);
+
+            if (matchesOrigin) {
+                Pedido pedido = ruta.getPedido();
+                LocalDateTime departureTime = primerVuelo.getHoraSalida();
+
+                // CLAVE: Solo mostrar si el vuelo aún no ha despegado (está en el futuro)
+                // No importa cuándo se registró el pedido, solo importa si el vuelo está por salir
+                if (currentTime.isBefore(departureTime)) {
+                    Map<String, Object> orderInfo = new HashMap<>();
+                    orderInfo.put("orderId", pedido.getIdCliente());
+                    orderInfo.put("destination", ruta.getDestinoFinal().getNombre());
+                    orderInfo.put("flightCode", generateFlightCode(primerVuelo));
+                    orderInfo.put("departureTime", departureTime.toString());
+                    orderInfo.put("weight", pedido.getCantidad());
+
+                    outgoingOrders.add(orderInfo);
+                }
+            }
+        }
+
+        // Ordenar por hora de salida del vuelo (más próximos primero)
+        outgoingOrders.sort((o1, o2) -> {
+            String time1 = (String) o1.get("departureTime");
+            String time2 = (String) o2.get("departureTime");
+            return time1.compareTo(time2);
+        });
+
+        // Limitar a 20 para tener margen (frontend mostrará 3)
+        if (outgoingOrders.size() > 20) {
+            outgoingOrders = outgoingOrders.subList(0, 20);
+        }
+
+        return outgoingOrders;
     }
 
     /**
