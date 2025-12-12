@@ -1,34 +1,38 @@
 package com.morapack.backend.service;
 
-import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Servicio optimizado para inserción masiva de pedidos usando JDBC batch.
- * Mucho más rápido que JPA saveAll() para grandes volúmenes.
+ * Servicio ULTRA OPTIMIZADO para inserción masiva de pedidos.
+ *
+ * Usa batchUpdate() con chunks para máxima velocidad.
+ * NO usa LOAD DATA INFILE para evitar problemas de configuración.
  */
 @Service
 public class Pedidobatchservice {
 
     private final JdbcTemplate jdbcTemplate;
 
+    // Tamaño del chunk - optimizado para MySQL
+    private static final int CHUNK_SIZE = 5000;
+
     public Pedidobatchservice(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
     /**
-     * Inserta múltiples pedidos en la BD usando JDBC batch insert.
+     * Inserta múltiples pedidos usando batch processing optimizado en chunks.
      *
-     * @param pedidos Lista de pedidos a insertar
-     * @param idInicial ID inicial desde donde empezar a numerar
-     * @return Cantidad de filas insertadas
+     * OPTIMIZACIONES:
+     * 1. Usa batchUpdate() real con prepared statements
+     * 2. Procesa en chunks de 5000 para evitar timeouts
+     * 3. NO requiere LOAD DATA INFILE habilitado
      */
     @Transactional
     public int insertarPedidosEnLote(List<Pedido> pedidos, Long idInicial) {
@@ -37,40 +41,61 @@ public class Pedidobatchservice {
         }
 
         long t1 = System.currentTimeMillis();
+        int totalInsertados = 0;
 
+        String sql = "INSERT INTO pedido " +
+                "(id, dia, mes, hora, minuto, anho, aeropuerto_destino, " +
+                "id_cliente, cantidad, cantidad_cumplida, estado, tramo_actual, hora_entrega) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'NO_ASIGNADO', 0, NULL)";
 
-        StringBuilder sql = new StringBuilder("INSERT INTO pedido ");
-        sql.append("(id, dia, mes, hora, minuto, anho, aeropuerto_destino, ");
-        sql.append("id_cliente, cantidad, cantidad_cumplida, estado, tramo_actual, hora_entrega) VALUES ");
+        // Procesar en chunks
+        int totalPedidos = pedidos.size();
+        int chunks = (int) Math.ceil((double) totalPedidos / CHUNK_SIZE);
 
-        for (int i = 0; i < pedidos.size(); i++) {
-            Pedido p = pedidos.get(i);
-            long nuevoId = idInicial + i + 1;
+        System.out.println("📦 Procesando " + totalPedidos + " pedidos en " + chunks + " chunks de hasta " + CHUNK_SIZE);
 
-            if (i > 0) sql.append(", ");
+        for (int chunkIndex = 0; chunkIndex < chunks; chunkIndex++) {
+            long chunkStart = System.currentTimeMillis();
 
-            sql.append(String.format("(%d, %d, %d, %d, %d, %d, '%s', '%s', %d, 0, 'NO_ASIGNADO', 0, NULL)",
-                    nuevoId,
-                    p.getDia(),
-                    p.getMes(),
-                    p.getHora(),
-                    p.getMinuto(),
-                    p.getAnho(),
-                    p.getAeropuertoDestino(),
-                    p.getIdCliente(),
-                    p.getCantidad()
-            ));
+            int startIdx = chunkIndex * CHUNK_SIZE;
+            int endIdx = Math.min(startIdx + CHUNK_SIZE, totalPedidos);
+
+            List<Object[]> batchArgs = new ArrayList<>(endIdx - startIdx);
+
+            for (int i = startIdx; i < endIdx; i++) {
+                Pedido p = pedidos.get(i);
+                long nuevoId = idInicial + i + 1;
+
+                batchArgs.add(new Object[]{
+                        nuevoId,
+                        p.getDia(),
+                        p.getMes(),
+                        p.getHora(),
+                        p.getMinuto(),
+                        p.getAnho(),
+                        p.getAeropuertoDestino(),
+                        p.getIdCliente(),
+                        p.getCantidad()
+                });
+            }
+
+            // Ejecutar batch para este chunk
+            int[] updateCounts = jdbcTemplate.batchUpdate(sql, batchArgs);
+            totalInsertados += updateCounts.length;
+
+            long chunkEnd = System.currentTimeMillis();
+            System.out.println("  ✅ Chunk " + (chunkIndex + 1) + "/" + chunks +
+                    ": " + updateCounts.length + " pedidos en " +
+                    (chunkEnd - chunkStart) + "ms");
         }
 
         long t2 = System.currentTimeMillis();
-        System.out.println("⏱️ Tiempo preparando SQL: " + (t2 - t1) + "ms");
+        long tiempoTotal = t2 - t1;
+        double pedidosPorSegundo = (totalInsertados * 1000.0) / tiempoTotal;
 
-        int rows = jdbcTemplate.update(sql.toString());
+        System.out.println("⚡ TOTAL: " + totalInsertados + " pedidos insertados en " +
+                tiempoTotal + "ms (" + String.format("%.0f", pedidosPorSegundo) + " pedidos/seg)");
 
-        long t3 = System.currentTimeMillis();
-        System.out.println("⏱️ Tiempo ejecutando SQL: " + (t3 - t2) + "ms");
-        System.out.println("⏱️ Tiempo TOTAL: " + (t3 - t1) + "ms");
-
-        return rows;
+        return totalInsertados;
     }
 }
