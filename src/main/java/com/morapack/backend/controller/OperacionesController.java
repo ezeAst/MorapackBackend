@@ -292,9 +292,14 @@ public class OperacionesController {
 
             int totalPaquetes = pedidosDelVuelo.stream().mapToInt(Pedido::getCantidad).sum();
 
-            // ✅ NUEVO: Extraer IDs de pedidos para mostrar en el tooltip del avión
-            List<String> orderIds = pedidosDelVuelo.stream()
-                    .map(p -> String.valueOf(p.getId()))
+            // ✅ Extraer IDs y cantidad de paquetes de cada pedido
+            List<Map<String, Object>> orderDetails = pedidosDelVuelo.stream()
+                    .map(p -> {
+                        Map<String, Object> orderMap = new HashMap<>();
+                        orderMap.put("id", String.valueOf(p.getId()));
+                        orderMap.put("cantidad", p.getCantidad());
+                        return orderMap;
+                    })
                     .collect(Collectors.toList());
 
             Map<String, Object> vuelo = new HashMap<>();
@@ -311,7 +316,7 @@ public class OperacionesController {
             vuelo.put("elapsedSeconds", elapsedSeconds);
             vuelo.put("packages", totalPaquetes); // ✅ Total de paquetes
             vuelo.put("pedidoCount", pedidosDelVuelo.size()); // ✅ Cuántos pedidos lleva
-            vuelo.put("orderIds", orderIds); // ✅ NUEVO: Lista de IDs de pedidos
+            vuelo.put("orders", orderDetails); // ✅ NUEVO: Lista de objetos con id y cantidad
             vuelo.put("capacity", 1000);
             vuelo.put("status", "EN_VUELO");
             vuelo.put("statusLabel", "En vuelo");
