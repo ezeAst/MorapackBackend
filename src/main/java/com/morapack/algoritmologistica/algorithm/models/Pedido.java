@@ -85,17 +85,36 @@ public class Pedido {
         this.idCliente = idCliente;
     }
 
-    // === NUEVO MÉTODO: Construir fecha completa ===
+    // === MÉTODOS DE FECHA ===
     /**
-     * Construye un LocalDateTime asumiendo un año específico
+     * Construye un LocalDateTime desde los campos separados
      *
      * @return Fecha completa del pedido
      */
     public LocalDateTime getFechaPedido() {
-        return LocalDateTime.of(anho, mes, dia, hora, minuto);
+        if (anho > 0 && mes > 0 && dia > 0) {
+            return LocalDateTime.of(anho, mes, dia, hora, minuto);
+        }
+        return null;
     }
 
-    // === GETTERS Y SETTERS (mantener todos los existentes) ===
+    /**
+     * Descompone un LocalDateTime en los campos separados (dia, mes, anho, hora, minuto)
+     * para guardarlos en la BD
+     *
+     * @param fechaPedido Fecha completa a descomponer
+     */
+    public void setFechaPedido(LocalDateTime fechaPedido) {
+        if (fechaPedido != null) {
+            this.dia = fechaPedido.getDayOfMonth();
+            this.mes = fechaPedido.getMonthValue();
+            this.anho = fechaPedido.getYear();
+            this.hora = fechaPedido.getHour();
+            this.minuto = fechaPedido.getMinute();
+        }
+    }
+
+    // === GETTERS Y SETTERS ===
     public Long getId() {
         return id;
     }
@@ -199,7 +218,6 @@ public class Pedido {
     public void setHoraEntrega(LocalDateTime horaEntrega) {
         this.horaEntrega = horaEntrega;
     }
-
 
     @Override
     public String toString() {

@@ -3,9 +3,11 @@ package com.morapack.backend.controller;
 import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import com.morapack.backend.repository.PedidoRepository;
+import com.morapack.backend.service.PedidoOperacionesCargaService;
 import com.morapack.backend.service.PedidoService;
 import com.morapack.backend.service.Pedidobatchservice;
 
+import com.morapack.backend.service.TiempoSimuladoService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.awt.print.Pageable;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -35,11 +38,14 @@ public class PedidoController {
     @PersistenceContext
     private EntityManager entityManager;
 
-    public PedidoController(PedidoService pedidoService) {
+    public PedidoController(PedidoService pedidoService, TiempoSimuladoService tiempoSimuladoService) {
         this.pedidoService = pedidoService;
+        this.tiempoSimuladoService = tiempoSimuladoService;
     }
     // Cache del último ID para evitar SELECT MAX() en cada request
     private AtomicLong cachedMaxId = new AtomicLong(-1);
+
+    private final TiempoSimuladoService tiempoSimuladoService;
 
     @GetMapping
     public List<Pedido> listar() {
@@ -120,18 +126,33 @@ public class PedidoController {
 
         if (!payload.containsKey("id_cliente") ||
                 !payload.containsKey("cantidad") ||
-                !payload.containsKey("aeropuerto_destino") ||
-                !payload.containsKey("created_at")) {
+                !payload.containsKey("aeropuerto_destino")) {
             return ResponseEntity.badRequest().body(Map.of(
-                    "mensaje", "Faltan campos: id_cliente, cantidad, aeropuerto_destino, created_at"
+                    "mensaje", "Faltan campos: id_cliente, cantidad, aeropuerto_destino"
             ));
         }
+
+        // ✅ NUEVO: Usar tiempo simulado en lugar de created_at del frontend
+        LocalDateTime tiempoSimulado = tiempoSimuladoService.obtenerTiempoActual();
+
+        // Sobrescribir created_at con tiempo simulado
+        payload.put("created_at", tiempoSimulado.toString());
+
+        // También establecer los campos de fecha individuales
+        payload.put("dia", tiempoSimulado.getDayOfMonth());
+        payload.put("mes", tiempoSimulado.getMonthValue());
+        payload.put("anho", tiempoSimulado.getYear());
+        payload.put("hora", tiempoSimulado.getHour());
+        payload.put("minuto", tiempoSimulado.getMinute());
+
+        System.out.println("📦 Insertando pedido manual con tiempo simulado: " + tiempoSimulado);
 
         Pedido creado = pedidoService.crearPedidoDesdePayload(payload);
 
         return ResponseEntity.ok(Map.of(
                 "id", creado.getId(),
-                "mensaje", "Pedido creado correctamente"
+                "mensaje", "Pedido creado con fecha simulada: " + tiempoSimulado,
+                "fechaCreacion", tiempoSimulado.toString()
         ));
     }
 
@@ -203,5 +224,53 @@ public class PedidoController {
         response.put("errores", 0);
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * ✅ NUEVO ENDPOINT - Importar pedidos para operaciones día a día
+     *
+     * Los pedidos con ## en día/hora/minuto usan el tiempo actual de la simulación
+     *
+     * POST /api/pedidos/importarOperaciones
+     * Body: Lista de PedidoOperacionDTO
+     */
+    @Autowired
+    private PedidoOperacionesCargaService pedidoOperacionesCargaService;
+
+    @PostMapping("/importarOperaciones")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> importarPedidosOperaciones(
+            @RequestBody List<PedidoOperacionesCargaService.PedidoOperacionDTO> pedidos) {
+
+        if (pedidos == null || pedidos.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "No se recibieron pedidos"
+            ));
+        }
+
+        try {
+            System.out.println("📦 Importando " + pedidos.size() + " pedidos para operaciones día a día");
+
+            PedidoOperacionesCargaService.ImportResult resultado =
+                    pedidoOperacionesCargaService.importarPedidosOperaciones(pedidos);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("pedidosInsertados", resultado.getPedidosInsertados());
+            response.put("tiempoMs", resultado.getTiempoMs());
+            response.put("conTiempoSimulado", resultado.getConTiempoSimulado());
+            response.put("conTiempoArchivo", resultado.getConTiempoArchivo());
+            response.put("tiempoSimuladoUsado", resultado.getTiempoSimuladoUsado());
+            response.put("mensaje", "✅ Pedidos importados exitosamente");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            System.err.println("❌ Error importando pedidos: " + e.getMessage());
+            e.printStackTrace();
+
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", e.getMessage()
+            ));
+        }
     }
 }

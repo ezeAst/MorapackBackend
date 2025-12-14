@@ -2,6 +2,7 @@ package com.morapack.backend.controller;
 
 import com.morapack.algoritmologistica.algorithm.models.EstadoPedido;
 import com.morapack.algoritmologistica.algorithm.models.Pedido;
+import com.morapack.algoritmologistica.algorithm.models.Vuelo; // ✅ NUEVO
 import com.morapack.backend.dto.InicioOperacionesRequest;
 import com.morapack.backend.entity.AeropuertoEntity;
 import com.morapack.backend.entity.RutaAsignada;
@@ -9,6 +10,7 @@ import com.morapack.backend.entity.RutaTramo;
 import com.morapack.backend.repository.AeropuertoRepository;
 import com.morapack.backend.repository.PedidoRepository;
 import com.morapack.backend.repository.RutaAsignadaRepository;
+import com.morapack.backend.repository.VueloRepository; // ✅ NUEVO
 import com.morapack.backend.service.OperacionesDiaDiaService;
 import com.morapack.backend.service.TiempoSimuladoService;
 import org.springframework.http.ResponseEntity;
@@ -30,17 +32,20 @@ public class OperacionesController {
     private final RutaAsignadaRepository rutaAsignadaRepository;
     private final AeropuertoRepository aeropuertoRepository;
     private final TiempoSimuladoService tiempoSimuladoService;
+    private final VueloRepository vueloRepository; // ✅ NUEVO
 
     public OperacionesController(OperacionesDiaDiaService operacionesService,
                                  PedidoRepository pedidoRepository,
                                  RutaAsignadaRepository rutaAsignadaRepository,
                                  AeropuertoRepository aeropuertoRepository,
-                                 TiempoSimuladoService tiempoSimuladoService) {
+                                 TiempoSimuladoService tiempoSimuladoService,
+                                 VueloRepository vueloRepository) {
         this.operacionesService = operacionesService;
         this.pedidoRepository = pedidoRepository;
         this.rutaAsignadaRepository = rutaAsignadaRepository;
         this.aeropuertoRepository = aeropuertoRepository;
         this.tiempoSimuladoService = tiempoSimuladoService;
+        this.vueloRepository = vueloRepository; // ✅ NUEVO
     }
 
     /**
@@ -245,7 +250,9 @@ public class OperacionesController {
                 .collect(Collectors.toMap(RutaAsignada::getPedidoId, r -> r));
 
 
+        // ✅ NUEVO: Estructura para agrupar pedidos Y sus rutas por vuelo
         Map<String, List<Pedido>> pedidosPorVuelo = new HashMap<>();
+        Map<String, List<RutaAsignada>> rutasPorVuelo = new HashMap<>(); // ✅ NUEVO
         Map<String, RutaTramo> tramoPorVuelo = new HashMap<>();
 
         for (Pedido pedido : pedidosEnVuelo) {
@@ -262,6 +269,7 @@ public class OperacionesController {
                     tramo.getFecha() + "-" + tramo.getHoraSalida();
 
             pedidosPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).add(pedido);
+            rutasPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).add(ruta); // ✅ NUEVO
             tramoPorVuelo.putIfAbsent(vueloKey, tramo);
         }
 
@@ -269,6 +277,7 @@ public class OperacionesController {
         for (Map.Entry<String, List<Pedido>> entry : pedidosPorVuelo.entrySet()) {
             String vueloKey = entry.getKey();
             List<Pedido> pedidosDelVuelo = entry.getValue();
+            List<RutaAsignada> rutasDelVuelo = rutasPorVuelo.get(vueloKey); // ✅ NUEVO
             RutaTramo tramo = tramoPorVuelo.get(vueloKey);
 
             AeropuertoEntity origen = aeropuertoRepository.findByCodigo(tramo.getOrigen()).orElse(null);
@@ -290,17 +299,28 @@ public class OperacionesController {
             double currentLng = origen.getLon() + (destino.getLon() - origen.getLon()) * progress;
 
 
-            int totalPaquetes = pedidosDelVuelo.stream().mapToInt(Pedido::getCantidad).sum();
+            // ✅ CAMBIO PRINCIPAL: Usar cantidad de RutaAsignada en lugar de Pedido
+            int totalPaquetes = rutasDelVuelo.stream()
+                    .mapToInt(RutaAsignada::getCantidad)
+                    .sum();
 
-            // ✅ Extraer IDs y cantidad de paquetes de cada pedido
-            List<Map<String, Object>> orderDetails = pedidosDelVuelo.stream()
-                    .map(p -> {
-                        Map<String, Object> orderMap = new HashMap<>();
-                        orderMap.put("id", String.valueOf(p.getId()));
-                        orderMap.put("cantidad", p.getCantidad());
-                        return orderMap;
-                    })
-                    .collect(Collectors.toList());
+            // ✅ Extraer IDs y cantidad de RUTAS (no de pedidos)
+            List<Map<String, Object>> orderDetails = new ArrayList<>();
+            List<String> orderIds = new ArrayList<>(); // ✅ NUEVO: Lista simple de IDs para frontend
+
+            for (int i = 0; i < pedidosDelVuelo.size(); i++) {
+                Pedido pedido = pedidosDelVuelo.get(i);
+                RutaAsignada ruta = rutasDelVuelo.get(i);
+
+                String pedidoId = String.valueOf(pedido.getId());
+
+                Map<String, Object> orderMap = new HashMap<>();
+                orderMap.put("id", pedidoId);
+                orderMap.put("cantidad", ruta.getCantidad()); // ✅ Usar cantidad de la ruta
+                orderDetails.add(orderMap);
+
+                orderIds.add(pedidoId); // ✅ NUEVO: Para el tooltip del frontend
+            }
 
             Map<String, Object> vuelo = new HashMap<>();
             vuelo.put("id", vueloKey); // ID único del vuelo
@@ -314,10 +334,18 @@ public class OperacionesController {
             vuelo.put("arrivalTime", horaLlegada.toString());
             vuelo.put("durationSeconds", durationSeconds);
             vuelo.put("elapsedSeconds", elapsedSeconds);
-            vuelo.put("packages", totalPaquetes); // ✅ Total de paquetes
             vuelo.put("pedidoCount", pedidosDelVuelo.size()); // ✅ Cuántos pedidos lleva
-            vuelo.put("orders", orderDetails); // ✅ NUEVO: Lista de objetos con id y cantidad
-            vuelo.put("capacity", 1000);
+            vuelo.put("orders", orderDetails); // ✅ Lista de objetos con id y cantidad de RUTA
+            vuelo.put("orderIds", orderIds); // ✅ NUEVO: Lista simple de IDs para tooltip del frontend
+
+            // ✅ Obtener capacidad real desde tabla de vuelos
+            int capacidadVuelo = obtenerCapacidadVuelo(tramo.getOrigen(), tramo.getDestino(), horaSalida);
+            vuelo.put("capacity", capacidadVuelo);
+
+            // 🎯 CAP: Si excede capacidad, mostrar máximo la capacidad (para que muestre 100% máx)
+            int paquetesMostrados = Math.min(totalPaquetes, capacidadVuelo);
+            vuelo.put("packages", paquetesMostrados);
+
             vuelo.put("status", "EN_VUELO");
             vuelo.put("statusLabel", "En vuelo");
             vuelo.put("progressPercentage", progress * 100.0);
@@ -327,6 +355,7 @@ public class OperacionesController {
 
         return vuelos;
     }
+
 
     private List<Map<String, Object>> obtenerAlmacenes() {
         LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
@@ -394,8 +423,9 @@ public class OperacionesController {
         Map<Long, RutaAsignada> rutasPorPedido = todasLasRutas.stream()
                 .collect(Collectors.toMap(RutaAsignada::getPedidoId, r -> r));
 
-        // Agrupar por vuelo (clave: origen-destino-fecha-hora)
+        // ✅ NUEVO: Agrupar pedidos Y rutas por vuelo
         Map<String, List<Pedido>> pedidosPorVuelo = new HashMap<>();
+        Map<String, List<RutaAsignada>> rutasPorVuelo = new HashMap<>(); // ✅ NUEVO
         Map<String, RutaTramo> tramoPorVuelo = new HashMap<>();
         Map<String, LocalDateTime> horaSalidaPorVuelo = new HashMap<>();
 
@@ -427,6 +457,7 @@ public class OperacionesController {
                     tramo.getFecha() + "-" + tramo.getHoraSalida();
 
             pedidosPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).add(pedido);
+            rutasPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).add(ruta); // ✅ NUEVO
             tramoPorVuelo.putIfAbsent(vueloKey, tramo);
             horaSalidaPorVuelo.putIfAbsent(vueloKey, horaSalida);
         }
@@ -442,12 +473,16 @@ public class OperacionesController {
             String vueloKey = entry.getKey();
             RutaTramo tramo = tramoPorVuelo.get(vueloKey);
             List<Pedido> pedidosDelVuelo = pedidosPorVuelo.get(vueloKey);
+            List<RutaAsignada> rutasDelVuelo = rutasPorVuelo.get(vueloKey); // ✅ NUEVO
             LocalDateTime horaSalida = entry.getValue();
 
             AeropuertoEntity destino = aeropuertoRepository.findByCodigo(tramo.getDestino()).orElse(null);
             if (destino == null) continue;
 
-            int totalPaquetes = pedidosDelVuelo.stream().mapToInt(Pedido::getCantidad).sum();
+            // ✅ CAMBIO: Usar cantidad de RutaAsignada en lugar de Pedido
+            int totalPaquetes = rutasDelVuelo.stream()
+                    .mapToInt(RutaAsignada::getCantidad)
+                    .sum();
 
             // Calcular hora de llegada
             LocalDateTime horaLlegada = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraLlegada()));
@@ -460,11 +495,18 @@ public class OperacionesController {
             vuelo.put("flightCode", tramo.getOrigen() + "-" + tramo.getDestino());
             vuelo.put("destination", destino.getNombre());
             vuelo.put("departureTime", horaSalida.toString());
-            vuelo.put("arrivalTime", horaLlegada.toString()); // ✅ Agregado
-            vuelo.put("packages", totalPaquetes);
-            vuelo.put("capacity", 1000);
+            vuelo.put("arrivalTime", horaLlegada.toString());
+
+            // ✅ Obtener capacidad real desde tabla de vuelos
+            int capacidadVuelo = obtenerCapacidadVuelo(tramo.getOrigen(), tramo.getDestino(), horaSalida);
+            vuelo.put("capacity", capacidadVuelo);
+
+            // 🎯 CAP: Si excede capacidad, mostrar máximo la capacidad (para que muestre 100% máx)
+            int paquetesMostrados = Math.min(totalPaquetes, capacidadVuelo);
+            vuelo.put("packages", paquetesMostrados);
+
             vuelo.put("status", "scheduled");
-            vuelo.put("occupancyPercentage", (totalPaquetes * 100.0) / 1000);
+            vuelo.put("occupancyPercentage", Math.min(100.0, (totalPaquetes * 100.0) / capacidadVuelo)); // ✅ Cap a 100%
 
             vuelos.add(vuelo);
             count++;
@@ -613,4 +655,38 @@ public class OperacionesController {
     }
 
 
+
+    /**
+     * ✅ NUEVO: Obtiene la capacidad real de un vuelo desde la tabla de vuelos
+     *
+     * @param origen Código ICAO del aeropuerto de origen
+     * @param destino Código ICAO del aeropuerto de destino
+     * @param horaSalida Hora de salida del vuelo
+     * @return Capacidad máxima del vuelo, o 1000 por defecto si no se encuentra
+     */
+    private int obtenerCapacidadVuelo(String origen, String destino, LocalDateTime horaSalida) {
+        try {
+            // Intentar buscar el vuelo exacto por origen, destino y hora de salida
+            return vueloRepository.findByOrigenDestinoHoraSalida(origen, destino, horaSalida)
+                    .map(Vuelo::getCapacidadMaxima)
+                    .orElseGet(() -> {
+                        // Si no se encuentra por hora exacta, buscar por origen y destino
+                        // y tomar el primero (asumiendo que todos los vuelos de esa ruta tienen la misma capacidad)
+                        List<Vuelo> vuelos = vueloRepository.findByOrigenAndDestino(origen, destino);
+                        if (!vuelos.isEmpty()) {
+                            int capacidad = vuelos.get(0).getCapacidadMaxima();
+                            System.out.println("⚠️ Vuelo exacto no encontrado, usando capacidad de ruta " +
+                                    origen + "-" + destino + ": " + capacidad);
+                            return capacidad;
+                        }
+                        // Si no hay ningún vuelo, usar valor por defecto
+                        System.out.println("⚠️ No se encontró vuelo para " + origen + "-" + destino +
+                                ", usando capacidad por defecto: 1000");
+                        return 1000;
+                    });
+        } catch (Exception e) {
+            System.err.println("❌ Error obteniendo capacidad del vuelo: " + e.getMessage());
+            return 1000; // Valor por defecto en caso de error
+        }
+    }
 }
