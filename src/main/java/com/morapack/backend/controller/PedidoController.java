@@ -273,4 +273,112 @@ public class PedidoController {
             ));
         }
     }
+
+    /**
+     * GET /api/pedidos/{id}/detalle
+     * Obtiene información detallada de un pedido incluyendo su ruta asignada
+     */
+    @GetMapping("/{id}/detalle")
+    public ResponseEntity<Map<String, Object>> obtenerDetallePedido(@PathVariable Long id) {
+        Pedido pedido = pedidoRepository.findById(id).orElse(null);
+        if (pedido == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Map<String, Object> detalle = new HashMap<>();
+        detalle.put("id", pedido.getId());
+        detalle.put("estado", pedido.getEstado().toString());
+        detalle.put("aeropuertoDestino", pedido.getAeropuertoDestino());
+        detalle.put("cantidad", pedido.getCantidad());
+        detalle.put("cantidadCumplida", pedido.getCantidadCumplida());
+        detalle.put("fecha", String.format("%04d-%02d-%02d", pedido.getAnho(), pedido.getMes(), pedido.getDia()));
+        detalle.put("hora", String.format("%02d:%02d", pedido.getHora(), pedido.getMinuto()));
+        detalle.put("idCliente", pedido.getIdCliente());
+        detalle.put("tramoActual", pedido.getTramoActual());
+        detalle.put("horaEntrega", pedido.getHoraEntrega() != null ? pedido.getHoraEntrega().toString() : null);
+
+        return ResponseEntity.ok(detalle);
+    }
+
+    /**
+     * GET /api/pedidos/{id}/ruta
+     * Obtiene la ruta asignada a un pedido con todos sus tramos y vuelos
+     */
+    @GetMapping("/{id}/ruta")
+    public ResponseEntity<Map<String, Object>> obtenerRutaPedido(@PathVariable Long id) {
+        Pedido pedido = pedidoRepository.findById(id).orElse(null);
+        if (pedido == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // Buscar la ruta asignada del pedido
+        List<?> rutaResult = entityManager.createNativeQuery(
+                "SELECT ra.id FROM rutas_asignadas ra WHERE ra.pedido_id = ?1"
+        ).setParameter(1, id).getResultList();
+
+        if (rutaResult.isEmpty()) {
+            return ResponseEntity.ok(Map.of("mensaje", "Pedido sin ruta asignada"));
+        }
+
+        Long rutaId = ((Number) rutaResult.get(0)).longValue();
+
+        // Obtener los tramos de la ruta
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> tramos = (List<Map<String, Object>>) (List<?>) entityManager.createNativeQuery(
+                "SELECT id, orden, origen, destino, fecha, hora_salida, hora_llegada FROM rutas_tramo WHERE ruta_id = ?1 ORDER BY orden ASC"
+        ).setParameter(1, rutaId).getResultList().stream()
+                .map(row -> {
+                    Object[] cols = (Object[]) row;
+                    Map<String, Object> tramo = new HashMap<>();
+                    tramo.put("id", cols[0]);
+                    tramo.put("orden", cols[1]);
+                    tramo.put("origen", cols[2]);
+                    tramo.put("destino", cols[3]);
+                    tramo.put("fecha", cols[4]);
+                    tramo.put("horaSalida", cols[5]);
+                    tramo.put("horaLlegada", cols[6]);
+                    return tramo;
+                })
+                .collect(Collectors.toList());
+
+        Map<String, Object> ruta = new HashMap<>();
+        ruta.put("rutaId", rutaId);
+        ruta.put("pedidoId", id);
+        ruta.put("tramoActual", pedido.getTramoActual());
+        ruta.put("totalTramos", tramos.size());
+        ruta.put("tramos", tramos);
+
+        return ResponseEntity.ok(ruta);
+    }
+
+    /**
+     * GET /api/pedidos/estado/{estado}
+     * Lista pedidos filtrados por estado
+     */
+    @GetMapping("/estado/{estado}")
+    public ResponseEntity<List<Map<String, Object>>> listarPorEstado(@PathVariable String estado) {
+        EstadoPedido estadoPedido;
+        try {
+            estadoPedido = EstadoPedido.valueOf(estado);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        List<Pedido> pedidos = pedidoRepository.findByEstadoIn(List.of(estadoPedido));
+
+        List<Map<String, Object>> response = pedidos.stream()
+                .map(p -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("estado", p.getEstado().toString());
+                    map.put("aeropuertoDestino", p.getAeropuertoDestino());
+                    map.put("cantidad", p.getCantidad());
+                    map.put("fecha", String.format("%04d-%02d-%02d", p.getAnho(), p.getMes(), p.getDia()));
+                    map.put("tramoActual", p.getTramoActual());
+                    return map;
+                })
+                .toList();
+
+        return ResponseEntity.ok(response);
+    }
 }

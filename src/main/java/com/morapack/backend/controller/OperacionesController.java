@@ -689,4 +689,150 @@ public class OperacionesController {
             return 1000; // Valor por defecto en caso de error
         }
     }
+
+    /**
+     * GET /api/operaciones/pedidos/{id}/asignacion
+     * Obtiene información de asignación de un pedido: ruta, tramos y vuelos asignados
+     */
+    @GetMapping("/pedidos/{id}/asignacion")
+    public ResponseEntity<Map<String, Object>> obtenerAsignacionPedido(@PathVariable Long id) {
+        Pedido pedido = pedidoRepository.findById(id).orElse(null);
+        if (pedido == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Map<String, Object> asignacion = new HashMap<>();
+        asignacion.put("pedidoId", pedido.getId());
+        asignacion.put("estado", pedido.getEstado().toString());
+        asignacion.put("tramoActual", pedido.getTramoActual());
+        asignacion.put("cantidadPaquetes", pedido.getCantidad());
+        asignacion.put("destino", pedido.getAeropuertoDestino());
+
+        // Obtener ruta asignada
+        List<RutaAsignada> rutas = rutaAsignadaRepository.findByPedidoIdIn(List.of(id));
+        if (!rutas.isEmpty()) {
+            RutaAsignada ruta = rutas.get(0);
+            List<Map<String, Object>> tramosInfo = new ArrayList<>();
+
+            for (int i = 0; i < ruta.getTramos().size(); i++) {
+                RutaTramo tramo = ruta.getTramos().get(i);
+                Map<String, Object> tramoMap = new HashMap<>();
+                tramoMap.put("orden", i);
+                tramoMap.put("origen", tramo.getOrigen());
+                tramoMap.put("destino", tramo.getDestino());
+                tramoMap.put("fecha", tramo.getFecha().toString());
+                tramoMap.put("horaSalida", tramo.getHoraSalida());
+                tramoMap.put("horaLlegada", tramo.getHoraLlegada());
+                tramoMap.put("esActual", i == pedido.getTramoActual());
+                tramosInfo.add(tramoMap);
+            }
+
+            asignacion.put("ruta", Map.of(
+                    "rutaId", ruta.getId(),
+                    "totalTramos", ruta.getTramos().size(),
+                    "tramos", tramosInfo
+            ));
+        } else {
+            asignacion.put("ruta", null);
+        }
+
+        return ResponseEntity.ok(asignacion);
+    }
+
+    /**
+     * GET /api/operaciones/resumen-estado
+     * Obtiene resumen de todos los pedidos por estado para el dashboard
+     */
+    @GetMapping("/resumen-estado")
+    public ResponseEntity<Map<String, Object>> obtenerResumenEstado() {
+        Map<String, Object> resumen = new HashMap<>();
+
+        // Contar por cada estado
+        Map<EstadoPedido, Long> conteoPorEstado = new HashMap<>();
+        for (EstadoPedido estado : EstadoPedido.values()) {
+            List<Pedido> pedidos = pedidoRepository.findByEstadoIn(List.of(estado));
+            conteoPorEstado.put(estado, (long) pedidos.size());
+        }
+
+        // Crear respuesta
+        Map<String, Object> estadoCounts = new HashMap<>();
+        conteoPorEstado.forEach((estado, count) -> 
+            estadoCounts.put(estado.toString(), count)
+        );
+
+        resumen.put("pedidosPorEstado", estadoCounts);
+        resumen.put("activo", operacionesService.isActivo());
+        resumen.put("inicioOperaciones", operacionesService.getInicioOperaciones());
+
+        return ResponseEntity.ok(resumen);
+    }
+
+    /**
+     * GET /api/operaciones/pedidos-sin-asignar
+     * Lista todos los pedidos que aún no han sido asignados a una ruta
+     */
+    @GetMapping("/pedidos-sin-asignar")
+    public ResponseEntity<List<Map<String, Object>>> obtenerPedidosSinAsignar() {
+        List<Pedido> pedidos = pedidoRepository.findByEstadoIn(List.of(EstadoPedido.NO_ASIGNADO));
+
+        List<Map<String, Object>> response = pedidos.stream()
+                .map(p -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("aeropuertoDestino", p.getAeropuertoDestino());
+                    map.put("cantidad", p.getCantidad());
+                    map.put("fecha", String.format("%04d-%02d-%02d", p.getAnho(), p.getMes(), p.getDia()));
+                    map.put("hora", String.format("%02d:%02d", p.getHora(), p.getMinuto()));
+                    map.put("idCliente", p.getIdCliente());
+                    return map;
+                })
+                .toList();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * GET /api/operaciones/pedidos-en-transito
+     * Lista todos los pedidos que están en vuelo (EN_TRANSITO)
+     */
+    @GetMapping("/pedidos-en-transito")
+    public ResponseEntity<List<Map<String, Object>>> obtenerPedidosEnTransito() {
+        List<Pedido> pedidos = pedidoRepository.findByEstadoIn(List.of(EstadoPedido.EN_TRANSITO));
+
+        List<Map<String, Object>> response = pedidos.stream()
+                .map(p -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("aeropuertoDestino", p.getAeropuertoDestino());
+                    map.put("cantidad", p.getCantidad());
+                    map.put("tramoActual", p.getTramoActual());
+                    map.put("horaEntrega", p.getHoraEntrega() != null ? p.getHoraEntrega().toString() : null);
+                    return map;
+                })
+                .toList();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * GET /api/operaciones/pedidos-entregados
+     * Lista todos los pedidos que ya han sido entregados (ENTREGADO)
+     */
+    @GetMapping("/pedidos-entregados")
+    public ResponseEntity<List<Map<String, Object>>> obtenerPedidosEntregados() {
+        List<Pedido> pedidos = pedidoRepository.findByEstadoIn(List.of(EstadoPedido.ENTREGADO));
+
+        List<Map<String, Object>> response = pedidos.stream()
+                .map(p -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("destino", p.getAeropuertoDestino());
+                    map.put("cantidad", p.getCantidad());
+                    map.put("horaEntrega", p.getHoraEntrega() != null ? p.getHoraEntrega().toString() : null);
+                    return map;
+                })
+                .toList();
+
+        return ResponseEntity.ok(response);
+    }
 }
