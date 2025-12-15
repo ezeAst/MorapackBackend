@@ -461,7 +461,7 @@ public class GRASP {
             return vuelosDisponibles;  // No hay vuelos desde este origen
         }
 
-        for (Vuelo v : vuelosDesdeOrigen) {  // ← Solo itera ~7 vuelos en vez de 210
+        for (Vuelo v : vuelosDesdeOrigen) {  // ← Solo itera ~7 vuelos en vez de 2📦
             if (v.getHoraSalida().isAfter(despuesDe) || v.getHoraSalida().isEqual(despuesDe)) {
                 vuelosDisponibles.add(v);
             }
@@ -721,21 +721,29 @@ public class GRASP {
      * @param rcl Lista de candidatos restringida
      * @return Lista de rutas creadas
      */
+
+
     private List<Ruta> asignarProductosConRCL(Pedido pedido, List<OpcionSede> rcl) {
         List<Ruta> rutasCreadas = new ArrayList<>();
         int cantidadPendiente = pedido.getCantidad() - pedido.getCantidadCumplida();
 
-        // Copiar RCL para poder remover opciones ya usadas
+        // Copiar la lista (que ya viene ordenada: índice 0 es la mejor)
         List<OpcionSede> rclDisponible = new ArrayList<>(rcl);
-        Random random = new Random();
+
+        // NOTA: Eliminamos el 'Random' para hacerlo determinista
 
         // Intentar asignar hasta completar el pedido o agotar opciones
         while (cantidadPendiente > 0 && !rclDisponible.isEmpty()) {
 
-            // Seleccionar aleatoriamente una opción
-            int indice = random.nextInt(rclDisponible.size());
+            // -----------------------------------------------------------
+            // CAMBIO: SIEMPRE ELEGIMOS LA PRIMERA (LA MEJOR)
+            // -----------------------------------------------------------
+            int indice = 0;
             OpcionSede opcion = rclDisponible.get(indice);
-            rclDisponible.remove(indice); // Remover para no repetir
+
+            // La removemos de la lista de disponibles.
+            // Si tiene capacidad, la usaremos. Si no, en la siguiente vuelta tomaremos la siguiente mejor.
+            rclDisponible.remove(indice);
 
             // Calcular cuántos productos caben en esta ruta (considerando VUELOS)
             int capacidadDisponibleVuelos = Integer.MAX_VALUE;
@@ -745,16 +753,15 @@ public class GRASP {
             }
 
             if (capacidadDisponibleVuelos <= 0) {
-                continue; // No hay capacidad en vuelos
+                continue; // No hay capacidad en vuelos, probar con la siguiente mejor
             }
 
             // Validar capacidades de ALMACENES en toda la ruta
             int capacidadDisponibleAlmacenes = validarCapacidadAlmacenesEnRuta(opcion.ruta);
 
             if (capacidadDisponibleAlmacenes <= 0) {
-                System.out.println("ADVERTENCIA: No hay capacidad en almacenes para ruta del pedido " +
-                        pedido.getIdCliente());
-                continue; // No hay capacidad en almacenes
+                // Opcional: System.out.println("ADVERTENCIA: Almacén lleno para ruta...");
+                continue; // No hay capacidad en almacenes, probar con la siguiente mejor
             }
 
             // Capacidad real disponible es el mínimo entre vuelos y almacenes
@@ -763,7 +770,7 @@ public class GRASP {
             // Asignar lo que cabe
             int cantidadAsignada = Math.min(cantidadPendiente, capacidadDisponibleRuta);
 
-            // Crear objeto Ruta primero (lo necesitamos para ProductoEnAlmacen)
+            // Crear objeto Ruta
             Ruta nuevaRuta = new Ruta(pedido, opcion.sede, opcion.ruta, cantidadAsignada);
 
             // Actualizar VUELOS

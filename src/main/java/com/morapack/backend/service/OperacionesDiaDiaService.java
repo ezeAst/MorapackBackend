@@ -30,6 +30,7 @@ public class OperacionesDiaDiaService {
     private final AeropuertoRepository aeropuertoRepository;
     private final JdbcTemplate jdbcTemplate;
     private final TiempoSimuladoService tiempoSimuladoService;
+    private final AlmacenOcupacionService almacenOcupacionService;  // ✅ NUEVO
     private boolean activo = false;
     private LocalDateTime inicioOperaciones;
     private List<String> eventosRecientes = new ArrayList<>();
@@ -38,12 +39,14 @@ public class OperacionesDiaDiaService {
                                     RutaAsignadaRepository rutaAsignadaRepository,
                                     AeropuertoRepository aeropuertoRepository,
                                     JdbcTemplate jdbcTemplate,
-                                    TiempoSimuladoService tiempoSimuladoService) {
+                                    TiempoSimuladoService tiempoSimuladoService,
+                                    AlmacenOcupacionService almacenOcupacionService) {  // ✅ NUEVO
         this.pedidoRepository = pedidoRepository;
         this.rutaAsignadaRepository = rutaAsignadaRepository;
         this.aeropuertoRepository = aeropuertoRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.tiempoSimuladoService = tiempoSimuladoService;
+        this.almacenOcupacionService = almacenOcupacionService;  // ✅ NUEVO
     }
 
     /**
@@ -74,73 +77,191 @@ public class OperacionesDiaDiaService {
     /**
      * Motor principal - Se ejecuta cada 10 segundos
      */
-    @Scheduled(fixedDelay = 10000) // 10 segundos
+    @Scheduled(fixedRate = 10000) // Cada 10 segundos
     @Transactional
     public void procesarOperaciones() {
         if (!activo) return;
 
-        // Usar tiempo simulado en lugar de tiempo real
         LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
-        LocalDateTime limite = ahora.plusHours(2);
 
-        // Avanzar el tiempo simulado en 10 segundos para el próximo ciclo
-        tiempoSimuladoService.avanzarTiempo(10);
-
-        String fechaStr = ahora.toLocalDate().toString();
-        String fechaMananaStr = limite.toLocalDate().toString(); // Puede ser hoy o mañana
-        String horaActualStr = ahora.toLocalTime().toString().substring(0, 5);
-        String horaLimiteStr = limite.toLocalTime().toString().substring(0, 5);
-        String fechaAyerStr = ahora.minusDays(1).toLocalDate().toString();
-
-        System.out.println("🔍 DEBUG Query params:");
-        System.out.println("   fechaStr: '" + fechaStr + "'");
-        System.out.println("   horaLimiteStr: '" + horaLimiteStr + "'");
-        System.out.println("   fechaAyerStr: '" + fechaAyerStr + "'");
-
-        List<Pedido> pedidosActivos = pedidoRepository.findActivosConVuelosProximos(
-                fechaStr,
-                fechaMananaStr,
-                horaActualStr,
-                horaLimiteStr,
-                fechaAyerStr
+        // Buscar pedidos activos (ASIGNADO, EN_TRANSITO, EN_ALMACEN_INTERMEDIO)
+        List<Pedido> pedidosActivos = pedidoRepository.findByEstadoIn(
+                List.of(EstadoPedido.ASIGNADO, EstadoPedido.EN_TRANSITO, EstadoPedido.EN_ALMACEN_INTERMEDIO)
         );
-        System.out.println("📊 Pedidos encontrados: " + pedidosActivos.size());
-
-        if (pedidosActivos.isEmpty()) {
-            System.out.println("⚠️ No se encontraron pedidos activos");
-            return;
-        }
 
         if (pedidosActivos.isEmpty()) return;
 
-        System.out.println("📊 Procesando " + pedidosActivos.size() + " pedidos (antes: ~9000)");
+        System.out.println("📊 Pedidos encontrados: " + pedidosActivos.size());
 
-        // 2. CARGAR TODAS LAS RUTAS DE UNA VEZ
-        List<Long> pedidoIds = pedidosActivos.stream()
-                .map(Pedido::getId)
-                .toList();
-
+        // Obtener TODAS las rutas de esos pedidos
+        List<Long> pedidoIds = pedidosActivos.stream().map(Pedido::getId).toList();
         List<RutaAsignada> todasLasRutas = rutaAsignadaRepository.findByPedidoIdIn(pedidoIds);
 
-        Map<Long, RutaAsignada> rutasPorPedido = new HashMap<>();
-        for (RutaAsignada ruta : todasLasRutas) {
-            rutasPorPedido.put(ruta.getPedidoId(), ruta);
+        // Agrupar rutas por pedido
+        Map<Long, List<RutaAsignada>> rutasPorPedido = todasLasRutas.stream()
+                .collect(Collectors.groupingBy(RutaAsignada::getPedidoId));
+
+        List<Pedido> pedidosModificados = new ArrayList<>();
+
+        // ✅ NUEVA LÓGICA: Procesar cada RUTA independientemente
+        for (Pedido pedido : pedidosActivos) {
+            List<RutaAsignada> rutasDelPedido = rutasPorPedido.get(pedido.getId());
+            if (rutasDelPedido == null || rutasDelPedido.isEmpty()) continue;
+
+            boolean modificado = false;
+
+            // Procesar CADA ruta del pedido
+            for (RutaAsignada ruta : rutasDelPedido) {
+                if (procesarRutaIndividual(pedido, ruta, ahora)) {
+                    modificado = true;
+                }
+            }
+
+            // ✅ TRANSICIÓN DE ESTADOS DEL PEDIDO
+            // Solo cuando TODAS las rutas hayan completado
+            if (modificado) {
+                verificarEstadoPedido(pedido, rutasDelPedido, ahora);
+                pedidosModificados.add(pedido);
+            }
         }
 
-        // 4. Procesar cada pedido
-        List<Pedido> pedidosModificados = pedidosActivos.stream()
-                .filter(pedido -> {
-                    RutaAsignada ruta = rutasPorPedido.get(pedido.getId());
-                    return procesarPedido(pedido, ruta, ahora);
-                })
-                .collect(Collectors.toList());
-
-
+        // Guardar cambios en batch
         if (!pedidosModificados.isEmpty()) {
-            System.out.println("💾 Guardando " + pedidosModificados.size() + " pedidos modificados");
-
-
             actualizarPedidosEnLote(pedidosModificados);
+        }
+    }
+
+    /**
+     * Procesa una ruta individual (puede haber varias rutas del mismo pedido)
+     */
+    private boolean procesarRutaIndividual(Pedido pedido, RutaAsignada ruta, LocalDateTime ahora) {
+        if (ruta.getTramos().isEmpty()) return false;
+
+        Integer tramoActual = pedido.getTramoActual();
+        if (tramoActual == null) tramoActual = 0;
+
+        // Si esta ruta ya completó todos sus tramos, no hacer nada
+        if (tramoActual >= ruta.getTramos().size()) return false;
+
+        RutaTramo tramo = ruta.getTramos().get(tramoActual);
+
+        LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
+        LocalDateTime horaLlegada = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraLlegada()));
+
+        if (horaLlegada.isBefore(horaSalida)) {
+            horaLlegada = horaLlegada.plusDays(1);
+        }
+
+        boolean cambio = false;
+
+        // DESPEGUE: Si llegó la hora y el pedido está ASIGNADO
+        if (!ahora.isBefore(horaSalida) && pedido.getEstado() == EstadoPedido.ASIGNADO) {
+            actualizarCapacidadAlmacen(tramo.getOrigen(), -ruta.getCantidad());
+            String vueloId = generarVueloId(tramo);
+            agregarEvento("🛫 Vuelo " + vueloId + " (Ruta " + ruta.getId() + ") despegó con " +
+                    ruta.getCantidad() + " paquetes del pedido #" + pedido.getId());
+            cambio = true;
+        }
+
+        // ATERRIZAJE: Si llegó la hora y el pedido está EN_TRANSITO
+        if (!ahora.isBefore(horaLlegada) && pedido.getEstado() == EstadoPedido.EN_TRANSITO) {
+            actualizarCapacidadAlmacen(tramo.getDestino(), ruta.getCantidad());
+
+            try {
+                almacenOcupacionService.eliminarOcupacion(pedido.getId(), tramo.getDestino());
+            } catch (Exception e) {
+                System.err.println("⚠️ Error eliminando ocupación: " + e.getMessage());
+            }
+
+            String vueloId = generarVueloId(tramo);
+            agregarEvento("🛬 Vuelo " + vueloId + " (Ruta " + ruta.getId() + ") aterrizó en " + tramo.getDestino());
+            cambio = true;
+        }
+
+        // SIGUIENTE VUELO: Si está en almacén intermedio
+        if (pedido.getEstado() == EstadoPedido.EN_ALMACEN_INTERMEDIO && tramoActual + 1 < ruta.getTramos().size()) {
+            RutaTramo siguienteTramo = ruta.getTramos().get(tramoActual + 1);
+            LocalDateTime siguienteSalida = LocalDateTime.of(siguienteTramo.getFecha(),
+                    LocalTime.parse(siguienteTramo.getHoraSalida()));
+
+            if (!ahora.isBefore(siguienteSalida)) {
+                actualizarCapacidadAlmacen(siguienteTramo.getOrigen(), -ruta.getCantidad());
+                String vueloId = generarVueloId(siguienteTramo);
+                agregarEvento("🛫 Vuelo " + vueloId + " (Ruta " + ruta.getId() +
+                        ") despegó con " + ruta.getCantidad() + " paquetes");
+                cambio = true;
+            }
+        }
+
+        return cambio;
+    }
+
+    /**
+     * Verifica el estado global del pedido basado en TODAS sus rutas
+     */
+    private void verificarEstadoPedido(Pedido pedido, List<RutaAsignada> rutasDelPedido, LocalDateTime ahora) {
+        Integer tramoActual = pedido.getTramoActual();
+        if (tramoActual == null) tramoActual = 0;
+
+        // Verificar si al menos UNA ruta ya despegó
+        boolean algunaDespego = false;
+        boolean todasAterrizaron = true;
+        boolean todasEntregadas = true;
+
+        for (RutaAsignada ruta : rutasDelPedido) {
+            if (tramoActual >= ruta.getTramos().size()) continue;
+
+            RutaTramo tramo = ruta.getTramos().get(tramoActual);
+            LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
+            LocalDateTime horaLlegada = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraLlegada()));
+
+            if (horaLlegada.isBefore(horaSalida)) {
+                horaLlegada = horaLlegada.plusDays(1);
+            }
+
+            if (!ahora.isBefore(horaSalida)) {
+                algunaDespego = true;
+            }
+
+            if (ahora.isBefore(horaLlegada)) {
+                todasAterrizaron = false;
+            }
+
+            if (tramoActual < ruta.getTramos().size() - 1) {
+                todasEntregadas = false;
+            }
+        }
+
+        // TRANSICIONES DE ESTADO
+        if (pedido.getEstado() == EstadoPedido.ASIGNADO && algunaDespego) {
+            pedido.setEstado(EstadoPedido.EN_TRANSITO);
+        } else if (pedido.getEstado() == EstadoPedido.EN_TRANSITO && todasAterrizaron) {
+            if (todasEntregadas) {
+                pedido.setEstado(EstadoPedido.ENTREGADO);
+                pedido.setHoraEntrega(ahora);
+                agregarEvento("✅ Pedido #" + pedido.getId() + " entregado completamente");
+            } else {
+                pedido.setEstado(EstadoPedido.EN_ALMACEN_INTERMEDIO);
+                pedido.setTramoActual(tramoActual + 1);
+            }
+        } else if (pedido.getEstado() == EstadoPedido.EN_ALMACEN_INTERMEDIO) {
+            // Verificar si el siguiente tramo ya despegó
+            boolean siguienteDespego = false;
+            for (RutaAsignada ruta : rutasDelPedido) {
+                if (tramoActual + 1 < ruta.getTramos().size()) {
+                    RutaTramo siguienteTramo = ruta.getTramos().get(tramoActual + 1);
+                    LocalDateTime siguienteSalida = LocalDateTime.of(siguienteTramo.getFecha(),
+                            LocalTime.parse(siguienteTramo.getHoraSalida()));
+                    if (!ahora.isBefore(siguienteSalida)) {
+                        siguienteDespego = true;
+                        break;
+                    }
+                }
+            }
+
+            if (siguienteDespego) {
+                pedido.setEstado(EstadoPedido.EN_TRANSITO);
+            }
         }
     }
 
@@ -195,6 +316,13 @@ public class OperacionesDiaDiaService {
         // CASO 2: Llegó hora de aterrizaje
         if (!ahora.isBefore(horaLlegada) && pedido.getEstado() == EstadoPedido.EN_TRANSITO) {
             actualizarCapacidadAlmacen(tramo.getDestino(), pedido.getCantidad());
+
+            // ✅ NUEVO: Eliminar ocupación temporal (ya llegó físicamente)
+            try {
+                almacenOcupacionService.eliminarOcupacion(pedido.getId(), tramo.getDestino());
+            } catch (Exception e) {
+                System.err.println("⚠️ Error eliminando ocupación temporal: " + e.getMessage());
+            }
 
             String vueloId = generarVueloId(tramo);
             agregarEvento("🛬 Vuelo " + vueloId + " aterrizó en " + tramo.getDestino());

@@ -5,7 +5,7 @@ import java.time.LocalDate;
 
 @Entity
 @Table(name = "rutas_tramo",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"ruta_id","orden"}))
+        uniqueConstraints = @UniqueConstraint(columnNames = {"ruta_asignada_id","orden"}))
 public class RutaTramo {
 
     @Id
@@ -14,7 +14,7 @@ public class RutaTramo {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "ruta_id", nullable = false, columnDefinition = "BIGINT UNSIGNED")
+    @JoinColumn(name = "ruta_asignada_id", nullable = false, columnDefinition = "BIGINT UNSIGNED")
     private RutaAsignada ruta;
 
     @Column(name = "orden", nullable = false)
@@ -27,16 +27,13 @@ public class RutaTramo {
     private String destino;
 
     @Column(name = "hora_salida", length = 5)
-    private String horaSalida;   // "HH:MM"
+    private String horaSalida;
 
     @Column(name = "hora_llegada", length = 5)
-    private String horaLlegada;  // "HH:MM"
+    private String horaLlegada;
 
     @Column(name = "fecha", nullable = false)
     private LocalDate fecha;
-
-    @Column(name = "capacidad_usada")
-    private Integer capacidadUsada; // opcional
 
     public Long getId() {
         return id;
@@ -92,14 +89,6 @@ public class RutaTramo {
 
     public void setHoraLlegada(String horaLlegada) {
         this.horaLlegada = horaLlegada;
-    }
-
-    public Integer getCapacidadUsada() {
-        return capacidadUsada;
-    }
-
-    public void setCapacidadUsada(Integer capacidadUsada) {
-        this.capacidadUsada = capacidadUsada;
     }
 
     public LocalDate getFecha() {

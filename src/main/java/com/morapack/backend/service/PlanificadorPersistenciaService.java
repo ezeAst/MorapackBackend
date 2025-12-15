@@ -13,12 +13,12 @@ import com.morapack.backend.repository.RutaAsignadaRepository;
 import com.morapack.backend.repository.RutaTramoRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.stereotype.Service;
+import jakarta.persistence.EntityManager;
 
 import java.time.LocalTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -43,6 +43,8 @@ public class PlanificadorPersistenciaService {
     private final JdbcTemplate jdbcTemplate;
     private final TiempoSimuladoService tiempoSimuladoService;
     private final OperacionesDiaDiaService operacionesDiaDiaService;
+    private final AlmacenOcupacionService almacenOcupacionService;
+    private final EntityManager entityManager; // ✅ NUEVO
 
     public PlanificadorPersistenciaService(PedidoRepository pedidoRepo,
                                            RutaAsignadaRepository rutaRepo,
@@ -50,7 +52,9 @@ public class PlanificadorPersistenciaService {
                                            RutaBatchService rutaBatchService,
                                            JdbcTemplate jdbcTemplate,
                                            TiempoSimuladoService tiempoSimuladoService,
-                                           OperacionesDiaDiaService operacionesDiaDiaService) {
+                                           OperacionesDiaDiaService operacionesDiaDiaService,
+                                           AlmacenOcupacionService almacenOcupacionService,
+                                           EntityManager entityManager) { // ✅ NUEVO
         this.pedidoRepo = pedidoRepo;
         this.rutaRepo = rutaRepo;
         this.algoritmo = algoritmo;
@@ -58,6 +62,8 @@ public class PlanificadorPersistenciaService {
         this.jdbcTemplate = jdbcTemplate;
         this.tiempoSimuladoService = tiempoSimuladoService;
         this.operacionesDiaDiaService = operacionesDiaDiaService;
+        this.almacenOcupacionService = almacenOcupacionService;
+        this.entityManager = entityManager; // ✅ NUEVO
     }
 
     @Transactional
@@ -101,15 +107,23 @@ public class PlanificadorPersistenciaService {
             return "Algoritmo no retornó rutas";
         }
 
-        int asignados = 0;
-        List<RutaAsignada> rutasParaGuardar = new ArrayList<>(); // ← AGREGAR ESTA LÍNEA
-
-        // 4) Preparar rutas (sin guardar aún)
+        // 4) Agrupar rutas por pedido
+        Map<Long, List<Ruta>> rutasPorPedido = new HashMap<>();
         for (Ruta rutaAlg : solucion.getRutas()) {
             if (rutaAlg == null || rutaAlg.getPedido() == null) continue;
-
             Long pedidoId = rutaAlg.getPedido().getId();
             if (pedidoId == null) continue;
+
+            rutasPorPedido.computeIfAbsent(pedidoId, k -> new ArrayList<>()).add(rutaAlg);
+        }
+
+        int asignados = 0;
+        List<RutaAsignada> rutasParaGuardar = new ArrayList<>();
+
+        // 5) Procesar todas las rutas de cada pedido
+        for (Map.Entry<Long, List<Ruta>> entry : rutasPorPedido.entrySet()) {
+            Long pedidoId = entry.getKey();
+            List<Ruta> rutasDelPedido = entry.getValue();
 
             var pedidoOpt = pedidoRepo.findById(pedidoId);
             if (pedidoOpt.isEmpty()) continue;
@@ -119,113 +133,131 @@ public class PlanificadorPersistenciaService {
             // Solo procesamos si el pedido sigue NO_ASIGNADO
             if (pedido.getEstado() != EstadoPedido.NO_ASIGNADO) continue;
 
-            // --- Cabecera (rutas_asignadas) ---
-            RutaAsignada cab = new RutaAsignada();
-            cab.setPedidoId(pedidoId);
-            cab.setCantidad(rutaAlg.getCantidad());
-
-            // --- Calcular fecha de cada tramo ---
             LocalDateTime fechaPedido = pedido.getFechaPedido();
-            LocalDate fechaActual = fechaPedido.toLocalDate();
 
-            int orden = 0;
-            List<Vuelo> vuelos = rutaAlg.getVuelos();
-            if (vuelos != null) {
-                for (Vuelo v : vuelos) {
-                    if (v == null) continue;
+            // Procesar TODAS las rutas de este pedido
+            for (Ruta rutaAlg : rutasDelPedido) {
+                // --- Cabecera (rutas_asignadas) ---
+                RutaAsignada cab = new RutaAsignada();
+                cab.setPedidoId(pedidoId);
+                cab.setCantidad(rutaAlg.getCantidad());
 
-                    RutaTramo t = new RutaTramo();
-                    t.setOrden(orden++);
-                    t.setOrigen(sane(v.getAeropuertoOrigen().getCodigo()));
-                    t.setDestino(sane(v.getAeropuertoDestino().getCodigo()));
+                int orden = 0;
+                List<Vuelo> vuelos = rutaAlg.getVuelos();
+                if (vuelos != null) {
+                    for (Vuelo v : vuelos) {
+                        if (v == null) continue;
 
-                    // ===== CONVERTIR HORAS LOCALES A HORA DE LIMA (UTC-5) =====
-                    int husoOrigen = v.getAeropuertoOrigen().getHusoHorario();
-                    int husoDestino = v.getAeropuertoDestino().getHusoHorario();
+                        RutaTramo t = new RutaTramo();
+                        t.setOrden(orden++);
+                        t.setOrigen(sane(v.getAeropuertoOrigen().getCodigo()));
+                        t.setDestino(sane(v.getAeropuertoDestino().getCodigo()));
 
-                    // Las horas del vuelo están en hora LOCAL de cada aeropuerto
-                    LocalDateTime horaSalidaLocal = v.getHoraSalida();
-                    LocalDateTime horaLlegadaLocal = v.getHoraLlegada();
+                        // ===== CONVERTIR HORAS LOCALES A HORA DE LIMA (UTC-5) =====
+                        int husoOrigen = v.getAeropuertoOrigen().getHusoHorario();
+                        int husoDestino = v.getAeropuertoDestino().getHusoHorario();
 
-                    // Paso 1: Convertir a UTC
-                    LocalDateTime horaSalidaUTC = convertirAUTC(horaSalidaLocal, husoOrigen);
-                    LocalDateTime horaLlegadaUTC = convertirAUTC(horaLlegadaLocal, husoDestino);
+                        LocalDateTime horaSalidaLocal = v.getHoraSalida();
+                        LocalDateTime horaLlegadaLocal = v.getHoraLlegada();
 
-                    // Paso 2: Convertir de UTC a hora de Lima
-                    LocalDateTime horaSalidaLima = convertirAHoraLima(horaSalidaUTC);
-                    LocalDateTime horaLlegadaLima = convertirAHoraLima(horaLlegadaUTC);
-                    // ===========================================================
+                        LocalDateTime horaSalidaUTC = convertirAUTC(horaSalidaLocal, husoOrigen);
+                        LocalDateTime horaLlegadaUTC = convertirAUTC(horaLlegadaLocal, husoDestino);
 
-                    String horaSalidaStr = toHHmm(horaSalidaLima);
-                    String horaLlegadaStr = toHHmm(horaLlegadaLima);
+                        LocalDateTime horaSalidaLima = convertirAHoraLima(horaSalidaUTC);
+                        LocalDateTime horaLlegadaLima = convertirAHoraLima(horaLlegadaUTC);
+                        // ===========================================================
 
-                    t.setHoraSalida(horaSalidaStr);
-                    t.setHoraLlegada(horaLlegadaStr);
+                        String horaSalidaStr = toHHmm(horaSalidaLima);
+                        String horaLlegadaStr = toHHmm(horaLlegadaLima);
 
+                        t.setHoraSalida(horaSalidaStr);
+                        t.setHoraLlegada(horaLlegadaStr);
+                        t.setFecha(horaSalidaLima.toLocalDate());
 
-                    t.setFecha(horaSalidaLima.toLocalDate());
-
-                    // Para el siguiente tramo, la fecha base es el día de llegada del vuelo actual
-                    // (asumimos que puede conectar el mismo día o siguiente)
-
-                    cab.addTramo(t);
+                        cab.addTramo(t);
+                    }
                 }
+
+                rutasParaGuardar.add(cab);
             }
-
-
-            rutasParaGuardar.add(cab);
-
-            // Marcar pedido como ASIGNADO (ya no lo guardamos aquí)
-            pedido.setEstado(EstadoPedido.ASIGNADO);
-            pedido.setTramoActual(0);
 
             asignados++;
         }
 
-
         if (!rutasParaGuardar.isEmpty()) {
             rutaBatchService.guardarRutasEnLote(rutasParaGuardar);
-        }
 
-
-        List<Pedido> pedidosActualizar = new ArrayList<>();
-        for (RutaAsignada ruta : rutasParaGuardar) {
-            pedidoRepo.findById(ruta.getPedidoId()).ifPresent(pedido -> {
-                pedido.setEstado(EstadoPedido.ASIGNADO);
-                pedido.setTramoActual(0);
-                pedidosActualizar.add(pedido);
-            });
-        }
-
-        if (!rutasParaGuardar.isEmpty()) {
-
-            StringBuilder sqlUpdate = new StringBuilder("UPDATE pedido SET estado = CASE id ");
-            StringBuilder sqlTramo = new StringBuilder(", tramo_actual = CASE id ");
-            StringBuilder sqlWhere = new StringBuilder(" WHERE id IN (");
-
-            for (int i = 0; i < rutasParaGuardar.size(); i++) {
-                RutaAsignada ruta = rutasParaGuardar.get(i);
-                Long pedidoId = ruta.getPedidoId();
-
-                sqlUpdate.append("WHEN ").append(pedidoId).append(" THEN 'ASIGNADO' ");
-                sqlTramo.append("WHEN ").append(pedidoId).append(" THEN 0 ");
-
-                if (i > 0) sqlWhere.append(", ");
-                sqlWhere.append(pedidoId);
+            // ✅ Registrar ocupaciones temporales
+            try {
+                almacenOcupacionService.registrarOcupacionesDeRutas(rutasParaGuardar);
+            } catch (Exception e) {
+                System.err.println("❌ Error registrando ocupaciones temporales: " + e.getMessage());
+                e.printStackTrace();
             }
 
-            sqlUpdate.append("END");
-            sqlTramo.append("END");
-            sqlWhere.append(")");
+            // 6) Actualizar estados de pedidos - usar pedidos únicos, no todas las rutas
+            Set<Long> pedidosUnicos = new HashSet<>();
+            for (RutaAsignada ruta : rutasParaGuardar) {
+                pedidosUnicos.add(ruta.getPedidoId());
+            }
 
-            String updateFinal = sqlUpdate.toString() + sqlTramo.toString() + sqlWhere.toString();
+            System.out.println("🔍 DEBUG: Rutas totales guardadas: " + rutasParaGuardar.size());
+            System.out.println("🔍 DEBUG: Pedidos únicos a actualizar: " + pedidosUnicos);
 
-            jdbcTemplate.update(updateFinal);
+            // ✅ LLAMAR A MÉTODO SEPARADO CON TRANSACCIÓN INDEPENDIENTE
+            actualizarEstadoPedidos(pedidosUnicos);
 
-            System.out.println("✅ Actualizados " + rutasParaGuardar.size() + " pedidos a ASIGNADO");
+            // ✅ AGREGAR ESTO INMEDIATAMENTE DESPUÉS:
+            System.out.println("🚨 CHECKPOINT: Después de actualizar estados");
+
+            try {
+                Thread.sleep(1000); // Pausa de 1 segundo
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            System.out.println("🚨 CHECKPOINT: Antes de return");
         }
+
         return "✅ Asignados=" + asignados + " de " + pendientesRango.size() +
                 " (Rango: " + rangoInicio.toLocalTime() + " - " + rangoFin.toLocalTime() + ")";
+    }
+
+    /**
+     * ✅ NUEVO: Actualiza el estado de los pedidos en una transacción independiente
+     * que se commitea inmediatamente sin depender de la transacción padre
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void actualizarEstadoPedidos(Set<Long> pedidosUnicos) {
+        if (pedidosUnicos.isEmpty()) return;
+
+        System.out.println("🔥 INICIANDO ACTUALIZACIÓN FORZADA DE PEDIDOS: " + pedidosUnicos);
+
+        // Método 1: Actualizar usando JPA directamente
+        for (Long pedidoId : pedidosUnicos) {
+            Pedido pedido = pedidoRepo.findById(pedidoId).orElse(null);
+            if (pedido != null) {
+                pedido.setEstado(EstadoPedido.ASIGNADO);
+                pedido.setTramoActual(0);
+                pedidoRepo.save(pedido);
+                System.out.println("📝 Pedido " + pedidoId + " guardado con estado ASIGNADO");
+            }
+        }
+
+        // Forzar commit inmediato
+        entityManager.flush();
+
+        System.out.println("✅ Flush completado");
+
+        // Verificar inmediatamente en BD
+        for (Long pedidoId : pedidosUnicos) {
+            Pedido verificado = pedidoRepo.findById(pedidoId).orElse(null);
+            if (verificado != null) {
+                System.out.println("🔍 VERIFICACIÓN: Pedido " + pedidoId +
+                        " - Estado: " + verificado.getEstado() +
+                        " - Tramo: " + verificado.getTramoActual());
+            }
+        }
     }
 
     // --------- helpers ---------

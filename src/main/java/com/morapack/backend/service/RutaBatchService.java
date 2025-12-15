@@ -60,40 +60,41 @@ public class RutaBatchService {
 
         jdbcTemplate.update(sqlRutas.toString());
 
-
-        StringBuilder sqlGetIds = new StringBuilder("SELECT id, pedido_id FROM rutas_asignadas WHERE pedido_id IN (");
-        for (int i = 0; i < batch.size(); i++) {
-            if (i > 0) sqlGetIds.append(", ");
-            sqlGetIds.append(batch.get(i).getPedidoId());
-        }
-        sqlGetIds.append(") ORDER BY id DESC LIMIT ").append(batch.size());
-
-        List<Long[]> idsGenerados = jdbcTemplate.query(sqlGetIds.toString(),
-                (rs, rowNum) -> new Long[]{rs.getLong("id"), rs.getLong("pedido_id")}
+        // ✅ FIX: Obtener los IDs generados EN ORDEN de inserción
+        StringBuilder sqlGetIds = new StringBuilder(
+                "SELECT id FROM rutas_asignadas WHERE creado_en = '" + ahora.toString() + "' ORDER BY id ASC"
         );
 
-        // Mapear pedidoId -> rutaId
-        java.util.Map<Long, Long> mapaPedidoRuta = new java.util.HashMap<>();
-        for (Long[] pair : idsGenerados) {
-            mapaPedidoRuta.put(pair[1], pair[0]); // pedidoId -> rutaId
+        List<Long> idsGenerados = jdbcTemplate.query(sqlGetIds.toString(),
+                (rs, rowNum) -> rs.getLong("id")
+        );
+
+        System.out.println("🔍 IDs generados: " + idsGenerados.size() + " para " + batch.size() + " rutas");
+
+        // ✅ FIX: Mapear por índice, no por pedido_id
+        if (idsGenerados.size() != batch.size()) {
+            System.err.println("❌ ERROR: Número de IDs generados (" + idsGenerados.size() +
+                    ") no coincide con batch (" + batch.size() + ")");
+            return;
         }
 
-
         StringBuilder sqlTramos = new StringBuilder(
-                "INSERT INTO rutas_tramo (capacidad_usada, destino, fecha, hora_llegada, hora_salida, orden, origen, ruta_id) VALUES "
+                "INSERT INTO rutas_tramo (destino, fecha, hora_llegada, hora_salida, orden, origen, ruta_asignada_id) VALUES "
         );
 
         boolean firstTramo = true;
-        for (RutaAsignada ruta : batch) {
-            Long rutaId = mapaPedidoRuta.get(ruta.getPedidoId());
-            if (rutaId == null) continue;
+        for (int i = 0; i < batch.size(); i++) {
+            RutaAsignada ruta = batch.get(i);
+            Long rutaId = idsGenerados.get(i); // ✅ Usar el índice correspondiente
+
+            System.out.println("📝 Guardando " + ruta.getTramos().size() + " tramos para ruta ID " + rutaId +
+                    " (pedido " + ruta.getPedidoId() + ", cantidad " + ruta.getCantidad() + ")");
 
             for (RutaTramo tramo : ruta.getTramos()) {
                 if (!firstTramo) sqlTramos.append(", ");
                 firstTramo = false;
 
-                sqlTramos.append(String.format("(%d, '%s', '%s', '%s', '%s', %d, '%s', %d)",
-                        tramo.getCapacidadUsada() != null ? tramo.getCapacidadUsada() : 0,
+                sqlTramos.append(String.format("('%s', '%s', '%s', '%s', %d, '%s', %d)",
                         tramo.getDestino(),
                         tramo.getFecha().toString(),
                         tramo.getHoraLlegada(),
@@ -107,6 +108,9 @@ public class RutaBatchService {
 
         if (!firstTramo) {
             jdbcTemplate.update(sqlTramos.toString());
+            System.out.println("✅ Tramos guardados exitosamente");
+        } else {
+            System.out.println("⚠️ No hay tramos para guardar");
         }
     }
 

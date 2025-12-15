@@ -6,6 +6,7 @@ import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import com.morapack.algoritmologistica.algorithm.models.Vuelo;
 import com.morapack.backend.entity.AeropuertoEntity;
 import com.morapack.backend.repository.AeropuertoRepository;
+import com.morapack.backend.repository.AlmacenOcupacionTemporalRepository;
 import com.morapack.backend.repository.PedidoRepository;
 import org.springframework.core.io.ClassPathResource;
 
@@ -22,39 +23,37 @@ public class LectorCSV {
 
 
     /**
-     * Lee aeropuertos directamente desde la base de datos
-     * con capacidad DISPONIBLE (máxima - ocupada)
-     * Para operaciones día a día en tiempo real
+     * ✅ NUEVA VERSIÓN - Lee aeropuertos desde BD considerando ocupación temporal
      *
-     * @param repository Repositorio de aeropuertos
-     * @return Lista de aeropuertos con capacidad ajustada
+     * Ocupación = Física + Temporal (tabla almacen_ocupacion_temporal)
+     *
+     * @param aeropuertoRepository Repositorio de aeropuertos
+     * @param ocupacionRepository Repositorio de ocupación temporal
+     * @param ahora Momento actual (tiempo simulado)
+     * @return Lista de aeropuertos con capacidad disponible ajustada
      */
     public static List<Aeropuerto> leerAeropuertosDesdeDB(
             AeropuertoRepository aeropuertoRepository,
-            PedidoRepository pedidoRepository
+            AlmacenOcupacionTemporalRepository ocupacionRepository,
+            LocalDateTime ahora
     ) {
         List<Aeropuerto> aeropuertos = new ArrayList<>();
 
         try {
             List<AeropuertoEntity> entities = aeropuertoRepository.findAll();
 
-            List<Pedido> pedidosAsignados = pedidoRepository.findByEstadoIn(
-                    List.of(EstadoPedido.ASIGNADO, EstadoPedido.EN_TRANSITO)  // ← Ambos
-            );
-            Map<String, Integer> ocupacionReservada = new HashMap<>();
-            for (Pedido pedido : pedidosAsignados) {
-                String destino = pedido.getAeropuertoDestino();
-                ocupacionReservada.put(
-                        destino,
-                        ocupacionReservada.getOrDefault(destino, 0) + pedido.getCantidad()
-                );
-            }
-
             for (AeropuertoEntity entity : entities) {
 
                 int capacidadMaxima = entity.getCapacidad();
-                int capacidadOcupada = entity.getCapacidadActual();
-                int reservada = ocupacionReservada.getOrDefault(entity.getCodigo(), 0);
+                int capacidadOcupada = entity.getCapacidadActual(); // Física (pedidos en almacén)
+
+                // ✅ NUEVO: Leer ocupación temporal desde la tabla
+                Integer ocupacionTemporal = ocupacionRepository.calcularOcupacionEn(
+                        entity.getCodigo(),
+                        ahora
+                );
+                int reservada = (ocupacionTemporal != null) ? ocupacionTemporal : 0;
+
                 int ocupacionTotal = capacidadOcupada + reservada;
                 int capacidadDisponible = Math.max(0, capacidadMaxima - ocupacionTotal);
 
@@ -82,7 +81,7 @@ public class LectorCSV {
             }
 
             System.out.println("✅ Aeropuertos cargados desde BD: " + aeropuertos.size());
-            System.out.println("   (Capacidad ajustada según ocupación actual + reservas)");
+            System.out.println("   (Capacidad ajustada según ocupación física + temporal)");
 
         } catch (Exception e) {
             System.err.println("❌ Error al leer aeropuertos desde BD: " + e.getMessage());
@@ -93,16 +92,79 @@ public class LectorCSV {
     }
 
     /**
-     * Lee el archivo de aeropuertos desde resources
-     * Formato: codigo,nombre,pais,capacidad,capacidadAct,husoHorario,continente
-     * @param rutaArchivo Ruta del archivo CSV (ej: "data/aeropuertos.csv")
-     * @return Lista de aeropuertos
+     * ⚠️ VERSIÓN ANTIGUA - Mantener por compatibilidad
+     *
+     * @deprecated Usar leerAeropuertosDesdeDB(aeropuertoRepository, ocupacionRepository, ahora)
      */
+    @Deprecated
+    public static List<Aeropuerto> leerAeropuertosDesdeDB(
+            AeropuertoRepository aeropuertoRepository,
+            PedidoRepository pedidoRepository
+    ) {
+        List<Aeropuerto> aeropuertos = new ArrayList<>();
+
+        try {
+            List<AeropuertoEntity> entities = aeropuertoRepository.findAll();
+
+            // ⚠️ MÉTODO ANTIGUO: Suma todos los pedidos al destino final
+            List<Pedido> pedidosAsignados = pedidoRepository.findByEstadoIn(
+                    List.of(EstadoPedido.ASIGNADO, EstadoPedido.EN_TRANSITO)
+            );
+            Map<String, Integer> ocupacionReservada = new HashMap<>();
+            for (Pedido pedido : pedidosAsignados) {
+                String destino = pedido.getAeropuertoDestino();
+                ocupacionReservada.put(
+                        destino,
+                        ocupacionReservada.getOrDefault(destino, 0) + pedido.getCantidad()
+                );
+            }
+
+            for (AeropuertoEntity entity : entities) {
+
+                int capacidadMaxima = entity.getCapacidad();
+                int capacidadOcupada = entity.getCapacidadActual();
+                int reservada = ocupacionReservada.getOrDefault(entity.getCodigo(), 0);
+                int ocupacionTotal = capacidadOcupada + reservada;
+                int capacidadDisponible = Math.max(0, capacidadMaxima - ocupacionTotal);
+
+                Aeropuerto aeropuerto = new Aeropuerto(
+                        entity.getCodigo(),
+                        entity.getNombre(),
+                        entity.getPais(),
+                        capacidadDisponible,
+                        entity.getHusoHorario(),
+                        entity.getContinente()
+                );
+
+                aeropuerto.setCapacidadActual(0);
+                aeropuertos.add(aeropuerto);
+
+                System.out.println("   📦 " + entity.getCodigo() +
+                        " - Ocupado: " + capacidadOcupada +
+                        " + Reservado: " + reservada +
+                        " = Total: " + ocupacionTotal +
+                        " | Disponible: " + capacidadDisponible);
+            }
+
+            System.out.println("✅ Aeropuertos cargados desde BD: " + aeropuertos.size());
+            System.out.println("   (Capacidad ajustada según ocupación actual + reservas)");
+
+        } catch (Exception e) {
+            System.err.println("❌ Error al leer aeropuertos desde BD: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return aeropuertos;
+    }
+
+    // ============================================
+    // MÉTODOS SIN CAMBIOS (leer desde archivos CSV)
+    // ============================================
+
     public static List<Aeropuerto> leerAeropuertos(String rutaArchivo) {
         List<Aeropuerto> aeropuertos = new ArrayList<>();
 
         try {
-            // Leer desde classpath (resources)
             ClassPathResource resource = new ClassPathResource(rutaArchivo);
             BufferedReader br = new BufferedReader(
                     new InputStreamReader(resource.getInputStream(), "UTF-8")
@@ -112,13 +174,11 @@ public class LectorCSV {
             boolean primeraLinea = true;
 
             while ((linea = br.readLine()) != null) {
-                // Saltar encabezado
                 if (primeraLinea) {
                     primeraLinea = false;
                     continue;
                 }
 
-                // Saltar líneas vacías
                 if (linea.trim().isEmpty()) {
                     continue;
                 }
@@ -153,17 +213,10 @@ public class LectorCSV {
         return aeropuertos;
     }
 
-    /**
-     * Lee el archivo de pedidos desde resources
-     * Formato: dd-hh-mm-DEST-###-IdCliente
-     * @param rutaArchivo Ruta del archivo (ej: "data/pedidos_m.txt")
-     * @return Lista de pedidos
-     */
     public static List<Pedido> leerPedidos(String rutaArchivo) {
         List<Pedido> pedidos = new ArrayList<>();
 
         try {
-            // Leer desde classpath (resources)
             ClassPathResource resource = new ClassPathResource(rutaArchivo);
             BufferedReader br = new BufferedReader(
                     new InputStreamReader(resource.getInputStream(), "UTF-8")
@@ -172,12 +225,10 @@ public class LectorCSV {
             String linea;
 
             while ((linea = br.readLine()) != null) {
-                // Saltar líneas vacías
                 if (linea.trim().isEmpty()) {
                     continue;
                 }
 
-                // Parsear formato: dd-hh-mm-DEST-###-IdCliente
                 String[] partes = linea.trim().split("-");
 
                 if (partes.length >= 6) {
@@ -207,18 +258,10 @@ public class LectorCSV {
         return pedidos;
     }
 
-    /**
-     * Lee el archivo de vuelos y genera instancias para la semana específica
-     * @param rutaArchivo Ruta del archivo (ej: "data/vuelos.txt")
-     * @param aeropuertos Lista de aeropuertos
-     * @param startTime Fecha de inicio de la semana (hora Lima)
-     * @return Lista de vuelos (7 instancias por cada plan de vuelo)
-     */
     public static List<Vuelo> leerVuelos(String rutaArchivo, List<Aeropuerto> aeropuertos,
                                          LocalDateTime startTime) {
         List<Vuelo> vuelos = new ArrayList<>();
 
-        // Crear mapa para búsqueda rápida de aeropuertos
         Map<String, Aeropuerto> mapaAeropuertos = new HashMap<>();
         for (Aeropuerto a : aeropuertos) {
             mapaAeropuertos.put(a.getCodigo(), a);
@@ -260,7 +303,6 @@ public class LectorCSV {
                     int horaLlegada = Integer.parseInt(horaLlegadaParts[0]);
                     int minutoLlegada = Integer.parseInt(horaLlegadaParts[1]);
 
-                    // ✅ CREAR 7 INSTANCIAS DEL VUELO PARA LA SEMANA ESPECÍFICA
                     for (int dia = 0; dia < 7; dia++) {
                         LocalDateTime fechaSalida = startTime
                                 .plusDays(dia)
@@ -276,7 +318,6 @@ public class LectorCSV {
                                 .withSecond(0)
                                 .withNano(0);
 
-                        // Si la hora de llegada es menor que la de salida, es del día siguiente
                         if (fechaLlegada.isBefore(fechaSalida)) {
                             fechaLlegada = fechaLlegada.plusDays(1);
                         }
@@ -305,12 +346,6 @@ public class LectorCSV {
         return vuelos;
     }
 
-    /**
-     * Identifica las sedes principales a partir de códigos dados
-     * @param aeropuertos Lista de todos los aeropuertos
-     * @param codigosSedes Lista de códigos de sedes (ej: ["SPIM", "EBCI", "UBBB"])
-     * @return Lista de aeropuertos que son sedes principales
-     */
     public static List<Aeropuerto> identificarSedesPrincipales(List<Aeropuerto> aeropuertos,
                                                                List<String> codigosSedes) {
         List<Aeropuerto> sedes = new ArrayList<>();

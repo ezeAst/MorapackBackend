@@ -4,7 +4,9 @@ import com.morapack.algoritmologistica.algorithm.models.*;
 import com.morapack.algoritmologistica.algorithm.solver.Planificador;
 import com.morapack.algoritmologistica.algorithm.solver.Solucion;
 import com.morapack.algoritmologistica.algorithm.util.LectorCSV;
+import com.morapack.backend.repository.AlmacenOcupacionTemporalRepository;  // ✅ NUEVO
 import com.morapack.backend.repository.PedidoRepository;
+import com.morapack.backend.service.TiempoSimuladoService;  // ✅ NUEVO
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import com.morapack.backend.repository.AeropuertoRepository;
@@ -27,19 +29,22 @@ public class PlanificadorService {
     private String pedidosPath;
 
     private final PedidoRepository pedidoRepository;
-    private final AeropuertoRepository aeropuertoRepository;  // ← AGREGAR
+    private final AeropuertoRepository aeropuertoRepository;
+    private final AlmacenOcupacionTemporalRepository ocupacionRepository;  // ✅ NUEVO
+    private final TiempoSimuladoService tiempoSimuladoService;  // ✅ NUEVO
 
     public PlanificadorService(
             PedidoRepository pedidoRepository,
-            AeropuertoRepository aeropuertoRepository  // ← AGREGAR
+            AeropuertoRepository aeropuertoRepository,
+            AlmacenOcupacionTemporalRepository ocupacionRepository,  // ✅ NUEVO
+            TiempoSimuladoService tiempoSimuladoService  // ✅ NUEVO
     ) {
         this.pedidoRepository = pedidoRepository;
-        this.aeropuertoRepository = aeropuertoRepository;  // ← AGREGAR
+        this.aeropuertoRepository = aeropuertoRepository;
+        this.ocupacionRepository = ocupacionRepository;  // ✅ NUEVO
+        this.tiempoSimuladoService = tiempoSimuladoService;  // ✅ NUEVO
     }
 
-    /**
-     * Ejecuta la planificación completa usando GRASP
-     */
     /**
      * Ejecuta la planificación completa usando GRASP
      */
@@ -68,11 +73,20 @@ public class PlanificadorService {
         return solucion;
     }
 
+    /**
+     * ✅ ACTUALIZADO - Ejecuta planificación con ocupación temporal
+     */
     public Solucion ejecutarPlanificacion(List<Pedido> pendientes) {
+        // ✅ NUEVO: Obtener tiempo actual simulado
+        LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
+
+        // ✅ ACTUALIZADO: Cargar aeropuertos con ocupación temporal
         List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertosDesdeDB(
                 aeropuertoRepository,
-                pedidoRepository
+                ocupacionRepository,  // ✅ NUEVO
+                ahora  // ✅ NUEVO
         );
+
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
 
@@ -87,7 +101,6 @@ public class PlanificadorService {
             startTime = primerPedido.getFechaPedido();
 
             // Ajustar al inicio del día
-            startTime = startTime.withHour(0).withMinute(0).withSecond(0);
 
             System.out.println("📅 Fecha calculada desde pedidos: " + startTime);
         } else {
@@ -97,7 +110,6 @@ public class PlanificadorService {
         }
 
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
-
 
         LocalDateTime tiempoLimite = startTime; // Ya está en hora de Lima (UTC-5)
 
