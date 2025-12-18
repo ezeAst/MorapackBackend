@@ -5,6 +5,7 @@ import com.morapack.algoritmologistica.algorithm.models.Pedido;
 import com.morapack.algoritmologistica.algorithm.models.Ruta;
 import com.morapack.algoritmologistica.algorithm.solver.Solucion;
 import com.morapack.algoritmologistica.algorithm.models.Vuelo;
+import com.morapack.algoritmologistica.algorithm.models.EstadoSistema; // ✅ NUEVO
 import com.morapack.algoritmologistica.service.PlanificadorService;
 import com.morapack.backend.repository.PedidoRepository;
 import com.morapack.backend.entity.RutaAsignada;
@@ -25,14 +26,6 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.stream.Collectors;
 
-/**
- * Toma SOLO pedidos NO_ASIGNADO, ejecuta el algoritmo y persiste:
- * - cabecera (rutas_asignadas)
- * - tramos   (rutas_tramo)
- * Luego marca el pedido como ASIGNADO.
- *
- * No reemplaza rutas existentes porque el job periódico solo trabaja con NO_ASIGNADO.
- */
 @Service
 public class PlanificadorPersistenciaService {
 
@@ -44,7 +37,9 @@ public class PlanificadorPersistenciaService {
     private final TiempoSimuladoService tiempoSimuladoService;
     private final OperacionesDiaDiaService operacionesDiaDiaService;
     private final AlmacenOcupacionService almacenOcupacionService;
-    private final EntityManager entityManager; // ✅ NUEVO
+    private final EntityManager entityManager;
+    private final EstadoSistemaService estadoSistemaService; // ✅ NUEVO
+    private final AlmacenOcupacionValidatorAdapter almacenValidator; // ✅ NUEVO
 
     public PlanificadorPersistenciaService(PedidoRepository pedidoRepo,
                                            RutaAsignadaRepository rutaRepo,
@@ -54,7 +49,9 @@ public class PlanificadorPersistenciaService {
                                            TiempoSimuladoService tiempoSimuladoService,
                                            OperacionesDiaDiaService operacionesDiaDiaService,
                                            AlmacenOcupacionService almacenOcupacionService,
-                                           EntityManager entityManager) { // ✅ NUEVO
+                                           EntityManager entityManager,
+                                           EstadoSistemaService estadoSistemaService, // ✅ NUEVO
+                                           AlmacenOcupacionValidatorAdapter almacenValidator) { // ✅ NUEVO
         this.pedidoRepo = pedidoRepo;
         this.rutaRepo = rutaRepo;
         this.algoritmo = algoritmo;
@@ -63,7 +60,9 @@ public class PlanificadorPersistenciaService {
         this.tiempoSimuladoService = tiempoSimuladoService;
         this.operacionesDiaDiaService = operacionesDiaDiaService;
         this.almacenOcupacionService = almacenOcupacionService;
-        this.entityManager = entityManager; // ✅ NUEVO
+        this.entityManager = entityManager;
+        this.estadoSistemaService = estadoSistemaService; // ✅ NUEVO
+        this.almacenValidator = almacenValidator; // ✅ NUEVO
     }
 
     @Transactional
@@ -75,14 +74,13 @@ public class PlanificadorPersistenciaService {
 
         // 1) Calcular ventana de búsqueda: 15 minutos atrás → ahora (con tiempo simulado)
         LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
-
         LocalDateTime rangoInicio = ahora.minusMinutes(15);
         LocalDateTime rangoFin = ahora;
 
         System.out.println("🕐 Rango de planificación: " + rangoInicio + " a " + rangoFin);
         System.out.println("   (Buscando pedidos atrasados y actuales)");
 
-        // 2) Buscar pedidos NO_ASIGNADO en ese rango PRECISO (incluyendo hora y minuto)
+        // 2) Buscar pedidos NO_ASIGNADO en ese rango PRECISO
         List<Pedido> pendientesRango = pedidoRepo.findNoAsignadosEnRangoPreciso(
                 rangoInicio.getYear(),
                 rangoInicio.getMonthValue(),
@@ -95,19 +93,38 @@ public class PlanificadorPersistenciaService {
                 rangoFin.getHour(),
                 rangoFin.getMinute()
         );
+
         if (pendientesRango.isEmpty()) {
             return "Sin pedidos NO_ASIGNADO en rango " + rangoInicio.toLocalTime() + " - " + rangoFin.toLocalTime();
         }
 
         System.out.println("📦 Pedidos a planificar: " + pendientesRango.size());
 
-        // 3) Ejecutar algoritmo SOLO con los pedidos del rango
-        Solucion solucion = algoritmo.ejecutarPlanificacion(pendientesRango);
+        // ✅ 3) CREAR ESTADO DEL SISTEMA ACTUAL
+        System.out.println("\n🔍 === OBTENIENDO ESTADO DEL SISTEMA ===");
+
+        // Obtener estado de vuelos ocupados (desde el día actual)
+        LocalDate fechaActual = ahora.toLocalDate();
+        Map<String, Integer> vuelosOcupados = estadoSistemaService.obtenerVuelosOcupados(fechaActual);
+
+        // Crear objeto EstadoSistema
+        EstadoSistema estadoActual = new EstadoSistema(vuelosOcupados);
+        estadoActual.setAlmacenValidator(almacenValidator);
+
+        // Imprimir estadísticas
+        estadoActual.imprimirEstadisticas();
+        estadoSistemaService.imprimirEstadoSistema(fechaActual, ahora);
+
+        System.out.println("✅ Estado del sistema cargado\n");
+
+        // ✅ 4) Ejecutar algoritmo CON el estado del sistema
+        Solucion solucion = algoritmo.ejecutarPlanificacion(pendientesRango, estadoActual);
+
         if (solucion == null || solucion.getRutas() == null || solucion.getRutas().isEmpty()) {
             return "Algoritmo no retornó rutas";
         }
 
-        // 4) Agrupar rutas por pedido
+        // 5) Agrupar rutas por pedido
         Map<Long, List<Ruta>> rutasPorPedido = new HashMap<>();
         for (Ruta rutaAlg : solucion.getRutas()) {
             if (rutaAlg == null || rutaAlg.getPedido() == null) continue;
@@ -120,7 +137,7 @@ public class PlanificadorPersistenciaService {
         int asignados = 0;
         List<RutaAsignada> rutasParaGuardar = new ArrayList<>();
 
-        // 5) Procesar todas las rutas de cada pedido
+        // 6) Procesar todas las rutas de cada pedido
         for (Map.Entry<Long, List<Ruta>> entry : rutasPorPedido.entrySet()) {
             Long pedidoId = entry.getKey();
             List<Ruta> rutasDelPedido = entry.getValue();
@@ -187,7 +204,7 @@ public class PlanificadorPersistenciaService {
         if (!rutasParaGuardar.isEmpty()) {
             rutaBatchService.guardarRutasEnLote(rutasParaGuardar);
 
-            // ✅ Registrar ocupaciones temporales
+            // Registrar ocupaciones temporales
             try {
                 almacenOcupacionService.registrarOcupacionesDeRutas(rutasParaGuardar);
             } catch (Exception e) {
@@ -195,7 +212,7 @@ public class PlanificadorPersistenciaService {
                 e.printStackTrace();
             }
 
-            // 6) Actualizar estados de pedidos - usar pedidos únicos, no todas las rutas
+            // 7) Actualizar estados de pedidos
             Set<Long> pedidosUnicos = new HashSet<>();
             for (RutaAsignada ruta : rutasParaGuardar) {
                 pedidosUnicos.add(ruta.getPedidoId());
@@ -204,14 +221,12 @@ public class PlanificadorPersistenciaService {
             System.out.println("🔍 DEBUG: Rutas totales guardadas: " + rutasParaGuardar.size());
             System.out.println("🔍 DEBUG: Pedidos únicos a actualizar: " + pedidosUnicos);
 
-            // ✅ LLAMAR A MÉTODO SEPARADO CON TRANSACCIÓN INDEPENDIENTE
             actualizarEstadoPedidos(pedidosUnicos);
 
-            // ✅ AGREGAR ESTO INMEDIATAMENTE DESPUÉS:
             System.out.println("🚨 CHECKPOINT: Después de actualizar estados");
 
             try {
-                Thread.sleep(1000); // Pausa de 1 segundo
+                Thread.sleep(1000);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -223,17 +238,12 @@ public class PlanificadorPersistenciaService {
                 " (Rango: " + rangoInicio.toLocalTime() + " - " + rangoFin.toLocalTime() + ")";
     }
 
-    /**
-     * ✅ NUEVO: Actualiza el estado de los pedidos en una transacción independiente
-     * que se commitea inmediatamente sin depender de la transacción padre
-     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void actualizarEstadoPedidos(Set<Long> pedidosUnicos) {
         if (pedidosUnicos.isEmpty()) return;
 
         System.out.println("🔥 INICIANDO ACTUALIZACIÓN FORZADA DE PEDIDOS: " + pedidosUnicos);
 
-        // Método 1: Actualizar usando JPA directamente
         for (Long pedidoId : pedidosUnicos) {
             Pedido pedido = pedidoRepo.findById(pedidoId).orElse(null);
             if (pedido != null) {
@@ -244,12 +254,9 @@ public class PlanificadorPersistenciaService {
             }
         }
 
-        // Forzar commit inmediato
         entityManager.flush();
-
         System.out.println("✅ Flush completado");
 
-        // Verificar inmediatamente en BD
         for (Long pedidoId : pedidosUnicos) {
             Pedido verificado = pedidoRepo.findById(pedidoId).orElse(null);
             if (verificado != null) {
@@ -266,13 +273,12 @@ public class PlanificadorPersistenciaService {
         return (s == null) ? null : s.trim();
     }
 
-    /** Convierte varios tipos a "HH:MM" o null (String/LocalTime/LocalDateTime/OffsetDateTime). */
     private static String toHHmm(Object timeObj) {
         if (timeObj == null) return null;
 
         if (timeObj instanceof String str) {
             String t = str.trim();
-            if (t.matches("^\\d{1}:\\d{2}$")) t = "0" + t;          // "8:05" -> "08:05"
+            if (t.matches("^\\d{1}:\\d{2}$")) t = "0" + t;
             return t.matches("^\\d{2}:\\d{2}$") ? t : null;
         }
         if (timeObj instanceof LocalTime lt) {
@@ -290,16 +296,10 @@ public class PlanificadorPersistenciaService {
         }
     }
 
-    /**
-     * Convierte una hora local a UTC
-     */
     private static LocalDateTime convertirAUTC(LocalDateTime fechaLocal, int husoHorario) {
         return fechaLocal.minusHours(husoHorario);
     }
 
-    /**
-     * Convierte UTC a hora de Lima (UTC-5)
-     */
     private static LocalDateTime convertirAHoraLima(LocalDateTime fechaUTC) {
         final int HUSO_LIMA = -5;
         return fechaUTC.plusHours(HUSO_LIMA);

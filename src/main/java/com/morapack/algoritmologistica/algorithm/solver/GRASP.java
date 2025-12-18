@@ -5,6 +5,7 @@ import com.morapack.algoritmologistica.algorithm.models.*;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.time.LocalDate;
 
 public class GRASP {
 
@@ -27,7 +28,7 @@ public class GRASP {
     private List<Long> tiemposArribo = new ArrayList<>();        // TA: Intervalos entre pedidos (minutos)
     private List<Long> tiemposServicio = new ArrayList<>();      // SA: Tiempo de procesamiento por pedido (ms)
     private List<Long> saltosConsumo = new ArrayList<>();        // SC: Tiempo desde registro hasta primer vuelo (minutos)
-
+    private EstadoSistema estadoSistema;
     private Map<String, List<Vuelo>> vuelosPorOrigen;
     // === Constructores ===
     public GRASP() {
@@ -38,6 +39,7 @@ public class GRASP {
         this.alpha = 0.3;           // Valor por defecto
         this.tamanoRCL = 3;         // Valor por defecto
         this.vuelosPorOrigen = new HashMap<>();
+        this.estadoSistema = new EstadoSistema();
     }
 
     public GRASP(List<Pedido> pedidos, List<Vuelo> vuelos,
@@ -51,11 +53,22 @@ public class GRASP {
         this.tamanoRCL = tamanoRCL;
         inicializarIndiceVuelos();
         this.cacheRutasGlobal = new HashMap<>();
+        this.estadoSistema = new EstadoSistema();
     }
 
     // === Getters y Setters ===
     public void setBatchCallback(GraspBatchCallback callback) {
         this.batchCallback = callback;
+    }
+
+    public EstadoSistema getEstadoSistema() {
+        return estadoSistema;
+    }
+
+    public void setEstadoSistema(EstadoSistema estadoSistema) {
+        this.estadoSistema = estadoSistema != null ? estadoSistema : new EstadoSistema();
+        System.out.println("📊 EstadoSistema configurado en GRASP");
+        this.estadoSistema.imprimirEstadisticas();
     }
 
     public void setBatchSize(int size) {
@@ -152,8 +165,16 @@ public class GRASP {
      * Genera una solución usando GRASP.
      * @return Una solución construida de manera greedy con aleatorización
      */
-    public Solucion generarSolucion(int year) {
+    public Solucion generarSolucion(int year, EstadoSistema estadoSistema){
         long startTime = System.currentTimeMillis();
+        // Configurar estado
+        if (estadoSistema != null) {
+            this.estadoSistema = estadoSistema;
+            System.out.println("✅ GRASP usando EstadoSistema proporcionado");
+        } else {
+            this.estadoSistema = new EstadoSistema();
+            System.out.println("⚠️ GRASP sin EstadoSistema - usando estado vacío");
+        }
 
         // ✅ ORDENAR PEDIDOS POR FECHA AL INICIO
         System.out.println("📦 Ordenando " + pedidos.size() + " pedidos por fecha...");
@@ -730,38 +751,55 @@ public class GRASP {
         // Copiar la lista (que ya viene ordenada: índice 0 es la mejor)
         List<OpcionSede> rclDisponible = new ArrayList<>(rcl);
 
-        // NOTA: Eliminamos el 'Random' para hacerlo determinista
-
         // Intentar asignar hasta completar el pedido o agotar opciones
         while (cantidadPendiente > 0 && !rclDisponible.isEmpty()) {
 
-            // -----------------------------------------------------------
-            // CAMBIO: SIEMPRE ELEGIMOS LA PRIMERA (LA MEJOR)
-            // -----------------------------------------------------------
-            int indice = 0;
-            OpcionSede opcion = rclDisponible.get(indice);
+            // SIEMPRE ELEGIMOS LA PRIMERA (LA MEJOR)
+            OpcionSede opcion = rclDisponible.get(0);
 
-            // La removemos de la lista de disponibles.
-            // Si tiene capacidad, la usaremos. Si no, en la siguiente vuelta tomaremos la siguiente mejor.
-            rclDisponible.remove(indice);
+            // ✅ NO REMOVER AÚN - Primero verificar si tiene capacidad
 
-            // Calcular cuántos productos caben en esta ruta (considerando VUELOS)
             int capacidadDisponibleVuelos = Integer.MAX_VALUE;
             for (Vuelo vuelo : opcion.ruta) {
-                int capacidadDisponible = vuelo.getCapacidadMaxima() - vuelo.getCapacidadActual();
+                // ✅ NUEVO: Generar clave del vuelo para consultar EstadoSistema
+                String claveVuelo = generarClaveVuelo(vuelo);
+
+                // ✅ NUEVO: Obtener ocupación de pedidos ASIGNADOS previos desde BD
+                int ocupacionPrevia = 0;
+                if (estadoSistema != null) {
+                    ocupacionPrevia = estadoSistema.getCapacidadOcupada(claveVuelo);
+                }
+
+                // ✅ CALCULAR CAPACIDAD REAL DISPONIBLE
+                // = Capacidad Total - Ocupación Local (memoria) - Ocupación Previa (BD)
+                int capacidadDisponible = vuelo.getCapacidadMaxima()
+                        - vuelo.getCapacidadActual()  // Ocupación local
+                        - ocupacionPrevia;             // Ocupación de BD
+
                 capacidadDisponibleVuelos = Math.min(capacidadDisponibleVuelos, capacidadDisponible);
+
+                // ✅ DEBUG (opcional): Mostrar validación
+                System.out.println(String.format(
+                        "🔍 Vuelo %s: Cap=%d | Actual=%d | BD=%d | Disp=%d",
+                        claveVuelo,
+                        vuelo.getCapacidadMaxima(),
+                        vuelo.getCapacidadActual(),
+                        ocupacionPrevia,
+                        capacidadDisponible
+                ));
             }
 
             if (capacidadDisponibleVuelos <= 0) {
-                continue; // No hay capacidad en vuelos, probar con la siguiente mejor
+                rclDisponible.remove(0); // ✅ Remover AHORA porque no tiene capacidad
+                continue;
             }
 
             // Validar capacidades de ALMACENES en toda la ruta
             int capacidadDisponibleAlmacenes = validarCapacidadAlmacenesEnRuta(opcion.ruta);
 
             if (capacidadDisponibleAlmacenes <= 0) {
-                // Opcional: System.out.println("ADVERTENCIA: Almacén lleno para ruta...");
-                continue; // No hay capacidad en almacenes, probar con la siguiente mejor
+                rclDisponible.remove(0); // ✅ Remover AHORA porque no tiene capacidad
+                continue;
             }
 
             // Capacidad real disponible es el mínimo entre vuelos y almacenes
@@ -791,6 +829,9 @@ public class GRASP {
 
             rutasCreadas.add(nuevaRuta);
             cantidadPendiente -= cantidadAsignada;
+
+            // ✅ NO REMOVER AÚN - Dejar que se reuse en la siguiente iteración
+            // La ruta solo se removerá cuando ya no tenga capacidad (arriba)
         }
 
         // Si aún quedan productos sin asignar
@@ -936,6 +977,128 @@ public class GRASP {
             vuelosPorOrigen.computeIfAbsent(origen, k -> new ArrayList<>()).add(v);
         }
         System.out.println("✅ Índice de vuelos creado: " + vuelosPorOrigen.size() + " orígenes");
+    }
+
+    public Solucion generarSolucion(int year) {
+        System.out.println("⚠️ Llamada sin EstadoSistema - usando estado vacío");
+        return generarSolucion(year, new EstadoSistema());
+    }
+
+    /**
+     * ✅ NUEVO: Valida capacidad de vuelos considerando el estado del sistema
+     */
+    private int validarCapacidadVuelosConEstado(List<Vuelo> ruta,
+                                                int cantidadSolicitada,
+                                                EstadoSistema estado) {
+        if (ruta == null || ruta.isEmpty()) return 0;
+
+        int capacidadMinima = Integer.MAX_VALUE;
+
+        for (Vuelo vuelo : ruta) {
+            int capacidadLocal = vuelo.getCapacidadMaxima() - vuelo.getCapacidadActual();
+            String claveVuelo = generarClaveVuelo(vuelo);
+            int ocupacionEstado = estado.getCapacidadOcupada(claveVuelo);
+            int capacidadReal = vuelo.getCapacidadMaxima() - vuelo.getCapacidadActual() - ocupacionEstado;
+
+            if (capacidadReal < 0) {
+                System.out.println("⚠️ Vuelo " + claveVuelo + " capacidad negativa");
+                capacidadReal = 0;
+            }
+
+            capacidadMinima = Math.min(capacidadMinima, capacidadReal);
+            if (capacidadMinima <= 0) return 0;
+        }
+
+        return capacidadMinima;
+    }
+
+    /**
+     * ✅ NUEVO: Valida capacidad de almacenes usando el estado del sistema
+     */
+    private int validarCapacidadAlmacenesEnRutaConEstado(List<Vuelo> ruta,
+                                                         int cantidadSolicitada,
+                                                         EstadoSistema estado) {
+        if (ruta == null || ruta.isEmpty()) return 0;
+
+        int capacidadMinima = Integer.MAX_VALUE;
+
+        for (int i = 0; i < ruta.size(); i++) {
+            Vuelo vueloActual = ruta.get(i);
+            Aeropuerto aeropuertoLlegada = vueloActual.getAeropuertoDestino();
+            LocalDateTime horaLlegada = vueloActual.getHoraLlegada();
+            Vuelo siguienteVuelo = (i < ruta.size() - 1) ? ruta.get(i + 1) : null;
+            LocalDateTime horaFin = (siguienteVuelo != null)
+                    ? siguienteVuelo.getHoraSalida()
+                    : horaLlegada.plusHours(2);
+
+            int capacidadActualLocal = aeropuertoLlegada.getCapacidad() -
+                    aeropuertoLlegada.calcularOcupacionEnMomento(horaLlegada);
+
+            int capacidadDisponible = 0;
+
+            if (estado.getAlmacenValidator() != null) {
+                boolean hayEspacio = estado.hayEspacioEnAlmacen(
+                        aeropuertoLlegada.getCodigo(),
+                        aeropuertoLlegada.getCapacidad(),
+                        aeropuertoLlegada.getCapacidad() - capacidadActualLocal,
+                        cantidadSolicitada,
+                        horaLlegada,
+                        horaFin
+                );
+                if (hayEspacio) capacidadDisponible = cantidadSolicitada;
+            } else {
+                // Fallback local
+                if (aeropuertoLlegada.hayEspacioEnPeriodo(cantidadSolicitada, horaLlegada, siguienteVuelo)) {
+                    capacidadDisponible = cantidadSolicitada;
+                } else {
+                    for (int test = 1; test <= capacidadActualLocal; test++) {
+                        if (aeropuertoLlegada.hayEspacioEnPeriodo(test, horaLlegada, siguienteVuelo)) {
+                            capacidadDisponible = test;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            capacidadMinima = Math.min(capacidadMinima, capacidadDisponible);
+            if (capacidadDisponible <= 0) return 0;
+        }
+
+        return capacidadMinima;
+    }
+
+    /**
+     * ✅ NUEVO: Convierte una fecha/hora local a hora de Lima (UTC-5)
+     * Esto es necesario porque la BD guarda todo en hora de Lima
+     */
+    private LocalDateTime convertirAHoraLima(LocalDateTime horaLocal, int husoHorario) {
+        // Lima está en UTC-5
+        // Primero convertir a UTC
+        LocalDateTime horaUTC = convertirAUTC(horaLocal, husoHorario);
+        // Luego de UTC a Lima (UTC-5)
+        return horaUTC.plusHours(-5);
+    }
+
+    /**
+     * ✅ MODIFICADO: Genera clave única para identificar un vuelo
+     * IMPORTANTE: Usa hora de Lima porque la BD guarda todo en hora de Lima
+     */
+    private String generarClaveVuelo(Vuelo vuelo) {
+        // ✅ Convertir hora de salida del vuelo a hora de Lima
+        LocalDateTime horaSalidaLima = convertirAHoraLima(
+                vuelo.getHoraSalida(),
+                vuelo.getAeropuertoOrigen().getHusoHorario()
+        );
+
+        String origen = vuelo.getAeropuertoOrigen().getCodigo();
+        String destino = vuelo.getAeropuertoDestino().getCodigo();
+        LocalDate fecha = horaSalidaLima.toLocalDate();
+        String hora = String.format("%02d:%02d",
+                horaSalidaLima.getHour(),
+                horaSalidaLima.getMinute());
+
+        return String.format("%s-%s-%s-%s", origen, destino, fecha, hora);
     }
 
 }

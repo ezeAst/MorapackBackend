@@ -82,6 +82,11 @@ public class OperacionesDiaDiaService {
     public void procesarOperaciones() {
         if (!activo) return;
 
+        // ✅ NUEVO: Avanzar el tiempo simulado ANTES de procesar
+        if (tiempoSimuladoService.isUsandoTiempoSimulado()) {
+            tiempoSimuladoService.avanzarTiempo(10); // Avanzar 10 segundos
+        }
+
         LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
 
         // Buscar pedidos activos (ASIGNADO, EN_TRANSITO, EN_ALMACEN_INTERMEDIO)

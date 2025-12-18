@@ -4,16 +4,22 @@ import com.morapack.algoritmologistica.algorithm.models.*;
 import com.morapack.algoritmologistica.algorithm.solver.Planificador;
 import com.morapack.algoritmologistica.algorithm.solver.Solucion;
 import com.morapack.algoritmologistica.algorithm.util.LectorCSV;
-import com.morapack.backend.repository.AlmacenOcupacionTemporalRepository;  // ✅ NUEVO
+import com.morapack.backend.entity.VueloCancelado;
+import com.morapack.backend.repository.AlmacenOcupacionTemporalRepository;
 import com.morapack.backend.repository.PedidoRepository;
-import com.morapack.backend.service.TiempoSimuladoService;  // ✅ NUEVO
+import com.morapack.backend.repository.VueloCanceladoRepository;
+import com.morapack.backend.service.TiempoSimuladoService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import com.morapack.backend.repository.AeropuertoRepository;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,19 +36,21 @@ public class PlanificadorService {
 
     private final PedidoRepository pedidoRepository;
     private final AeropuertoRepository aeropuertoRepository;
-    private final AlmacenOcupacionTemporalRepository ocupacionRepository;  // ✅ NUEVO
-    private final TiempoSimuladoService tiempoSimuladoService;  // ✅ NUEVO
+    private final AlmacenOcupacionTemporalRepository ocupacionRepository;
+    private final TiempoSimuladoService tiempoSimuladoService;
+    private final VueloCanceladoRepository vueloCanceladoRepository; // ✅ NUEVO
 
     public PlanificadorService(
             PedidoRepository pedidoRepository,
             AeropuertoRepository aeropuertoRepository,
-            AlmacenOcupacionTemporalRepository ocupacionRepository,  // ✅ NUEVO
-            TiempoSimuladoService tiempoSimuladoService  // ✅ NUEVO
-    ) {
+            AlmacenOcupacionTemporalRepository ocupacionRepository,
+            TiempoSimuladoService tiempoSimuladoService,
+            VueloCanceladoRepository vueloCanceladoRepository) { // ✅ NUEVO
         this.pedidoRepository = pedidoRepository;
         this.aeropuertoRepository = aeropuertoRepository;
-        this.ocupacionRepository = ocupacionRepository;  // ✅ NUEVO
-        this.tiempoSimuladoService = tiempoSimuladoService;  // ✅ NUEVO
+        this.ocupacionRepository = ocupacionRepository;
+        this.tiempoSimuladoService = tiempoSimuladoService;
+        this.vueloCanceladoRepository = vueloCanceladoRepository; // ✅ NUEVO
     }
 
     /**
@@ -55,9 +63,12 @@ public class PlanificadorService {
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
 
-        // ✅ USAR FECHA POR DEFECTO (enero 2025)
+        // Usar fecha por defecto (enero 2025)
         LocalDateTime startTime = LocalDateTime.of(2025, 1, 1, 0, 0);
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
+
+        // ✅ FILTRAR VUELOS CANCELADOS
+        vuelos = filtrarVuelosCancelados(vuelos);
 
         List<Pedido> pedidos = pedidoRepository.findPendientes();
 
@@ -74,75 +85,152 @@ public class PlanificadorService {
     }
 
     /**
-     * ✅ ACTUALIZADO - Ejecuta planificación con ocupación temporal
+     * ✅ NUEVO - Ejecuta planificación CON EstadoSistema
+     * Esta es la versión que se debe usar desde PlanificadorPersistenciaService
      */
-    public Solucion ejecutarPlanificacion(List<Pedido> pendientes) {
-        // ✅ NUEVO: Obtener tiempo actual simulado
+    public Solucion ejecutarPlanificacion(List<Pedido> pendientes, EstadoSistema estadoSistema) {
+        System.out.println("📊 === EJECUTANDO PLANIFICACIÓN CON ESTADO DEL SISTEMA ===");
+
+        if (estadoSistema != null) {
+            System.out.println("✅ EstadoSistema recibido correctamente");
+            estadoSistema.imprimirEstadisticas();
+        } else {
+            System.out.println("⚠️ EstadoSistema es null - creando estado vacío");
+            estadoSistema = new EstadoSistema();
+        }
+
+        // Obtener tiempo actual simulado
         LocalDateTime ahora = tiempoSimuladoService.obtenerTiempoActual();
 
-        // ✅ ACTUALIZADO: Cargar aeropuertos con ocupación temporal
+        // Cargar aeropuertos con ocupación temporal
         List<Aeropuerto> aeropuertos = LectorCSV.leerAeropuertosDesdeDB(
                 aeropuertoRepository,
-                ocupacionRepository,  // ✅ NUEVO
-                ahora  // ✅ NUEVO
+                ocupacionRepository,
+                ahora
         );
 
         List<String> codigosSedes = List.of("SPIM", "EBCI", "UBBB");
         List<Aeropuerto> sedesPrincipales = LectorCSV.identificarSedesPrincipales(aeropuertos, codigosSedes);
 
-        // ✅ CALCULAR FECHA DESDE EL PRIMER PEDIDO
+        // Calcular fecha desde el primer pedido
         LocalDateTime startTime;
         int year;
 
         if (pendientes != null && !pendientes.isEmpty()) {
-            // Usar la fecha del primer pedido
             Pedido primerPedido = pendientes.get(0);
-            year = LocalDateTime.now().getYear(); // Año actual
+            year = LocalDateTime.now().getYear();
             startTime = primerPedido.getFechaPedido();
-
-            // Ajustar al inicio del día
-
             System.out.println("📅 Fecha calculada desde pedidos: " + startTime);
         } else {
-            // Fallback: usar fecha actual
             startTime = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
             year = startTime.getYear();
         }
 
         List<Vuelo> vuelos = LectorCSV.leerVuelos(vuelosPath, aeropuertos, startTime);
 
-        LocalDateTime tiempoLimite = startTime; // Ya está en hora de Lima (UTC-5)
+        // ✅ FILTRAR VUELOS CANCELADOS ANTES DE PLANIFICAR
+        int vuelosTotales = vuelos.size();
+        vuelos = filtrarVuelosCancelados(vuelos);
+        int vuelosFiltrados = vuelosTotales - vuelos.size();
+
+        if (vuelosFiltrados > 0) {
+            System.out.println("🚫 Vuelos cancelados filtrados: " + vuelosFiltrados);
+        }
+
+        LocalDateTime tiempoLimite = startTime;
 
         List<Vuelo> vuelosDisponibles = vuelos.stream()
                 .filter(v -> {
-                    // Convertir hora de salida (local del aeropuerto) a hora de Lima
                     int husoOrigen = v.getAeropuertoOrigen().getHusoHorario();
                     LocalDateTime horaSalidaLocal = v.getHoraSalida();
-
-                    // Paso 1: Convertir a UTC
                     LocalDateTime horaSalidaUTC = horaSalidaLocal.minusHours(husoOrigen);
-
-                    // Paso 2: Convertir de UTC a Lima (UTC-5)
                     LocalDateTime horaSalidaLima = horaSalidaUTC.plusHours(-5);
-
-                    // Comparar en la misma zona horaria
                     return horaSalidaLima.isAfter(tiempoLimite);
                 })
                 .collect(Collectors.toList());
 
-        System.out.println("✈️ Vuelos totales: " + vuelos.size());
+        System.out.println("✈️ Vuelos totales (después de filtrar cancelados): " + vuelos.size());
         System.out.println("✈️ Vuelos disponibles (futuros): " + vuelosDisponibles.size());
 
-        List<Pedido> pedidos = pendientes;
+        // Crear planificador
+        Planificador planificador = new Planificador(pendientes, vuelosDisponibles, aeropuertos, sedesPrincipales);
 
-        Planificador planificador = new Planificador(pedidos, vuelosDisponibles, aeropuertos, sedesPrincipales);
-        Solucion solucion = planificador.ejecutarPlanificacion(year);
+        // ✅ PASAR EL ESTADO DEL SISTEMA AL PLANIFICADOR
+        Solucion solucion = planificador.ejecutarPlanificacion(year, estadoSistema);
 
-        System.out.println("\n=== SOLUCIÓN GENERADA ===");
+        System.out.println("\n=== SOLUCIÓN GENERADA CON ESTADO ===");
         System.out.println("Fitness: " + solucion.getFitness());
         System.out.println("Rutas: " + solucion.getNumeroDeRutas());
 
         return solucion;
+    }
+
+    /**
+     * ✅ NUEVO - Filtra vuelos que han sido cancelados
+     *
+     * Compara cada vuelo con la tabla de vuelos_cancelados
+     * y elimina los que coincidan
+     */
+    private List<Vuelo> filtrarVuelosCancelados(List<Vuelo> vuelos) {
+        // Obtener todas las cancelaciones activas
+        List<VueloCancelado> cancelaciones = vueloCanceladoRepository.findByActivoTrue();
+
+        if (cancelaciones.isEmpty()) {
+            System.out.println("✅ No hay cancelaciones activas - usando todos los vuelos");
+            return vuelos;
+        }
+
+        System.out.println("\n🚫 === FILTRANDO VUELOS CANCELADOS ===");
+        System.out.println("📋 Cancelaciones activas: " + cancelaciones.size());
+
+        // Crear un mapa para búsqueda rápida
+        // Key: "ORIGEN-DESTINO-FECHA-HH:mm"
+        Map<String, VueloCancelado> mapaCancelaciones = new HashMap<>();
+        for (VueloCancelado cancelacion : cancelaciones) {
+            String clave = cancelacion.getClave();
+            mapaCancelaciones.put(clave, cancelacion);
+        }
+
+        // Filtrar vuelos
+        List<Vuelo> vuelosFiltrados = new ArrayList<>();
+        int vuelosEliminados = 0;
+
+        for (Vuelo vuelo : vuelos) {
+            // Extraer datos del vuelo para comparar
+            String origen = vuelo.getAeropuertoOrigen().getCodigo();
+            String destino = vuelo.getAeropuertoDestino().getCodigo();
+            LocalDateTime horaSalida = vuelo.getHoraSalida();
+            LocalDate fecha = horaSalida.toLocalDate();
+            String horaSalidaStr = String.format("%02d:%02d",
+                    horaSalida.getHour(), horaSalida.getMinute());
+
+            // Crear clave del vuelo
+            String claveVuelo = String.format("%s-%s-%s-%s",
+                    origen, destino, fecha.toString(), horaSalidaStr);
+
+            // Verificar si está cancelado
+            if (mapaCancelaciones.containsKey(claveVuelo)) {
+                vuelosEliminados++;
+                System.out.println("   ❌ Vuelo cancelado: " + claveVuelo);
+            } else {
+                vuelosFiltrados.add(vuelo);
+            }
+        }
+
+        System.out.println("✅ Vuelos originales: " + vuelos.size());
+        System.out.println("❌ Vuelos eliminados: " + vuelosEliminados);
+        System.out.println("✅ Vuelos disponibles: " + vuelosFiltrados.size());
+        System.out.println();
+
+        return vuelosFiltrados;
+    }
+
+    /**
+     * Ejecuta planificación SIN EstadoSistema (compatibilidad con código anterior)
+     */
+    public Solucion ejecutarPlanificacion(List<Pedido> pendientes) {
+        System.out.println("⚠️ Ejecutando planificación SIN EstadoSistema - usando estado vacío");
+        return ejecutarPlanificacion(pendientes, new EstadoSistema());
     }
 
     /**

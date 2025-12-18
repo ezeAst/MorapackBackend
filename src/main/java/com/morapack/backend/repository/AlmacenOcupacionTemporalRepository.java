@@ -60,19 +60,23 @@ public interface AlmacenOcupacionTemporalRepository extends JpaRepository<Almace
     );
 
     /**
-     * Calcula la ocupación máxima en un periodo
+     * ✅ CORREGIDO: Calcula la ocupación máxima en un periodo
      *
      * Encuentra el momento de máxima ocupación en el rango dado
+     *
+     * CAMBIO: Usa nativeQuery porque Hibernate 6 no soporta bien subqueries
+     * derivadas en JPQL. La query SQL es idéntica pero ahora funciona correctamente.
      */
-    @Query("SELECT COALESCE(MAX(ocupacion), 0) FROM (" +
+    @Query(value = "SELECT COALESCE(MAX(ocupacion), 0) FROM (" +
             "  SELECT SUM(o.cantidad) as ocupacion " +
-            "  FROM AlmacenOcupacionTemporal o " +
-            "  WHERE o.aeropuertoCodigo = :codigo " +
-            "  AND (o.horaInicio BETWEEN :inicio AND :fin " +
-            "       OR o.horaFin BETWEEN :inicio AND :fin " +
-            "       OR (o.horaInicio < :inicio AND o.horaFin > :fin)) " +
-            "  GROUP BY o.horaInicio" +
-            ") AS ocupaciones")
+            "  FROM almacen_ocupacion_temporal o " +
+            "  WHERE o.aeropuerto_codigo = :codigo " +
+            "  AND (o.hora_inicio BETWEEN :inicio AND :fin " +
+            "       OR o.hora_fin BETWEEN :inicio AND :fin " +
+            "       OR (o.hora_inicio < :inicio AND o.hora_fin > :fin)) " +
+            "  GROUP BY o.hora_inicio" +
+            ") AS ocupaciones",
+            nativeQuery = true)
     Integer calcularOcupacionMaximaEnPeriodo(
             @Param("codigo") String aeropuertoCodigo,
             @Param("inicio") LocalDateTime inicio,

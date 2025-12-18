@@ -88,6 +88,39 @@ public class Planificador {
         }
     }
 
+    public Solucion ejecutarPlanificacion(int year, EstadoSistema estadoSistema) {
+        System.out.println("📊 === PLANIFICADOR CON ESTADO DEL SISTEMA ===");
+
+        // Validar estado
+        if (estadoSistema == null) {
+            System.out.println("⚠️ EstadoSistema null - creando vacío");
+            estadoSistema = new EstadoSistema();
+        } else {
+            System.out.println("✅ EstadoSistema recibido en Planificador");
+            estadoSistema.imprimirEstadisticas();
+        }
+
+        // Crear GRASP (usa tu código existente para crear grasp)
+        GRASP grasp = new GRASP(
+                pedidos,
+                vuelos,
+                aeropuertos,
+                sedesPrincipales,
+                alphaGRASP,
+                tamanoRCL
+        );
+
+        // ✅ CONFIGURAR ESTADO EN GRASP
+        grasp.setEstadoSistema(estadoSistema);
+
+        // ✅ EJECUTAR CON ESTADO
+        Solucion solucion = grasp.generarSolucion(year, estadoSistema);
+
+        System.out.println("✅ Planificación completada con estado");
+
+        return solucion;
+    }
+
     /**
      * Ejecuta solo GRASP (modo actual)
      * @return Mejor solución de GRASP

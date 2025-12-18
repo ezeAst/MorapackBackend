@@ -234,73 +234,74 @@ public class OperacionesController {
     private List<Map<String, Object>> obtenerVuelosActivos(LocalDateTime ahora) {
         List<Map<String, Object>> vuelos = new ArrayList<>();
 
-        // ✅ CAMBIO: Buscar TODOS los pedidos EN_TRANSITO (sin filtrar por hora)
         List<Pedido> pedidosEnTransito = pedidoRepository.findByEstadoIn(List.of(EstadoPedido.EN_TRANSITO));
-
         if (pedidosEnTransito.isEmpty()) return vuelos;
 
         System.out.println("🔍 Pedidos EN_TRANSITO encontrados: " + pedidosEnTransito.size());
 
-        // Obtener TODAS las rutas de esos pedidos
         List<Long> pedidoIds = pedidosEnTransito.stream().map(Pedido::getId).toList();
         List<RutaAsignada> todasLasRutas = rutaAsignadaRepository.findByPedidoIdIn(pedidoIds);
 
         System.out.println("🔍 Rutas totales: " + todasLasRutas.size());
 
-        // Procesar cada ruta individualmente
+        // ✅ NUEVO: Agrupar por vuelo físico (origen-destino-fecha-hora)
+        Map<String, List<RutaAsignada>> rutasPorVuelo = new HashMap<>();
+        Map<String, RutaTramo> tramoPorVuelo = new HashMap<>();
+        Map<String, Pedido> pedidoPorRuta = new HashMap<>();
+
+        // Crear índice de pedidos
+        Map<Long, Pedido> pedidosMap = pedidosEnTransito.stream()
+                .collect(Collectors.toMap(Pedido::getId, p -> p));
+
+        // Agrupar rutas por vuelo
         for (RutaAsignada ruta : todasLasRutas) {
-            System.out.println("🔍 Evaluando ruta " + ruta.getId() + " del pedido " + ruta.getPedidoId());
-
-            Pedido pedido = pedidosEnTransito.stream()
-                    .filter(p -> p.getId().equals(ruta.getPedidoId()))
-                    .findFirst()
-                    .orElse(null);
-
-            if (pedido == null) {
-                System.out.println("❌ Ruta " + ruta.getId() + ": Pedido no encontrado");
-                continue;
-            }
+            Pedido pedido = pedidosMap.get(ruta.getPedidoId());
+            if (pedido == null) continue;
 
             Integer tramoActual = pedido.getTramoActual();
-            System.out.println("📍 Ruta " + ruta.getId() + ": tramoActual=" + tramoActual + ", totalTramos=" + ruta.getTramos().size());
-
-            if (tramoActual == null || tramoActual >= ruta.getTramos().size()) {
-                System.out.println("❌ Ruta " + ruta.getId() + ": tramoActual fuera de rango");
-                continue;
-            }
+            if (tramoActual == null || tramoActual >= ruta.getTramos().size()) continue;
 
             RutaTramo tramo = ruta.getTramos().get(tramoActual);
-            System.out.println("🛫 Ruta " + ruta.getId() + ": Tramo " + tramo.getOrden() + " - " +
-                    tramo.getOrigen() + "→" + tramo.getDestino() +
-                    " (" + tramo.getHoraSalida() + "-" + tramo.getHoraLlegada() + ")");
 
             LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
             LocalDateTime horaLlegada = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraLlegada()));
 
             if (horaLlegada.isBefore(horaSalida)) {
                 horaLlegada = horaLlegada.plusDays(1);
-                System.out.println("🌙 Ruta " + ruta.getId() + ": Ajustada llegada a día siguiente: " + horaLlegada);
             }
 
-            System.out.println("⏰ Ruta " + ruta.getId() + ": Ahora=" + ahora + ", Salida=" + horaSalida + ", Llegada=" + horaLlegada);
+            // Solo vuelos en el aire
+            if (ahora.isBefore(horaSalida) || ahora.isAfter(horaLlegada)) continue;
 
-            if (ahora.isBefore(horaSalida)) {
-                System.out.println("⏰ Ruta " + ruta.getId() + " aún no despega");
-                continue;
-            }
+            // Clave única por vuelo físico
+            String vueloKey = tramo.getOrigen() + "-" + tramo.getDestino() + "-" +
+                    tramo.getFecha() + "-" + tramo.getHoraSalida();
 
-            if (ahora.isAfter(horaLlegada)) {
-                System.out.println("🛬 Ruta " + ruta.getId() + " ya aterrizó");
-                continue;
-            }
+            rutasPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).add(ruta);
+            tramoPorVuelo.putIfAbsent(vueloKey, tramo);
+            pedidoPorRuta.put(ruta.getId().toString(), pedido);
+        }
 
-            System.out.println("✈️ Procesando ruta " + ruta.getId() + ": " + tramo.getOrigen() + "→" + tramo.getDestino());
+        System.out.println("📊 Vuelos físicos únicos: " + rutasPorVuelo.size());
+
+        // Construir objetos de vuelo agrupados
+        for (Map.Entry<String, List<RutaAsignada>> entry : rutasPorVuelo.entrySet()) {
+            String vueloKey = entry.getKey();
+            List<RutaAsignada> rutasEnVuelo = entry.getValue();
+            RutaTramo tramo = tramoPorVuelo.get(vueloKey);
+
+            System.out.println("✈️ Procesando vuelo: " + vueloKey + " con " + rutasEnVuelo.size() + " rutas");
 
             AeropuertoEntity origen = aeropuertoRepository.findByCodigo(tramo.getOrigen()).orElse(null);
             AeropuertoEntity destino = aeropuertoRepository.findByCodigo(tramo.getDestino()).orElse(null);
-            if (origen == null || destino == null) {
-                System.out.println("❌ Aeropuertos no encontrados: " + tramo.getOrigen() + " / " + tramo.getDestino());
-                continue;
+
+            if (origen == null || destino == null) continue;
+
+            LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
+            LocalDateTime horaLlegada = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraLlegada()));
+
+            if (horaLlegada.isBefore(horaSalida)) {
+                horaLlegada = horaLlegada.plusDays(1);
             }
 
             long durationSeconds = java.time.Duration.between(horaSalida, horaLlegada).getSeconds();
@@ -310,8 +311,27 @@ public class OperacionesController {
             double currentLat = origen.getLat() + (destino.getLat() - origen.getLat()) * progress;
             double currentLng = origen.getLon() + (destino.getLon() - origen.getLon()) * progress;
 
-            String vueloKey = "R" + ruta.getId() + "-" + tramo.getOrigen() + "-" + tramo.getDestino() + "-" +
-                    tramo.getFecha() + "-" + tramo.getHoraSalida();
+            // ✅ Calcular totales sumando todas las rutas en este vuelo
+            int totalPaquetes = rutasEnVuelo.stream()
+                    .mapToInt(RutaAsignada::getCantidad)
+                    .sum();
+
+            // ✅ Recopilar todos los IDs de pedidos
+            List<String> orderIds = rutasEnVuelo.stream()
+                    .map(r -> String.valueOf(r.getPedidoId()))
+                    .distinct()
+                    .collect(Collectors.toList());
+
+            // ✅ Detalles de cada pedido/ruta en el vuelo
+            List<Map<String, Object>> orderDetails = new ArrayList<>();
+            for (RutaAsignada ruta : rutasEnVuelo) {
+                Pedido pedido = pedidoPorRuta.get(ruta.getId().toString());
+                Map<String, Object> orderMap = new HashMap<>();
+                orderMap.put("id", String.valueOf(pedido.getId()));
+                orderMap.put("cantidad", ruta.getCantidad());
+                orderMap.put("destino", pedido.getAeropuertoDestino());
+                orderDetails.add(orderMap);
+            }
 
             Map<String, Object> vuelo = new HashMap<>();
             vuelo.put("id", vueloKey);
@@ -325,25 +345,19 @@ public class OperacionesController {
             vuelo.put("arrivalTime", horaLlegada.toString());
             vuelo.put("durationSeconds", durationSeconds);
             vuelo.put("elapsedSeconds", elapsedSeconds);
-            vuelo.put("pedidoCount", 1);
-            vuelo.put("orderIds", List.of(String.valueOf(pedido.getId())));
-
-            List<Map<String, Object>> orderDetails = new ArrayList<>();
-            Map<String, Object> orderMap = new HashMap<>();
-            orderMap.put("id", String.valueOf(pedido.getId()));
-            orderMap.put("cantidad", ruta.getCantidad());
-            orderDetails.add(orderMap);
-            vuelo.put("orders", orderDetails);
+            vuelo.put("pedidoCount", orderIds.size()); // ✅ Cantidad real de pedidos
+            vuelo.put("orderIds", orderIds); // ✅ Todos los IDs
+            vuelo.put("orders", orderDetails); // ✅ Detalles completos
 
             int capacidadVuelo = obtenerCapacidadVuelo(tramo.getOrigen(), tramo.getDestino(), horaSalida);
             vuelo.put("capacity", capacidadVuelo);
-            vuelo.put("packages", Math.min(ruta.getCantidad(), capacidadVuelo));
+            vuelo.put("packages", Math.min(totalPaquetes, capacidadVuelo)); // ✅ Total real
             vuelo.put("status", "EN_VUELO");
             vuelo.put("statusLabel", "En vuelo");
             vuelo.put("progressPercentage", progress * 100.0);
 
             vuelos.add(vuelo);
-            System.out.println("✅ Vuelo agregado: " + vueloKey);
+            System.out.println("✅ Vuelo agregado: " + vueloKey + " - Pedidos: " + orderIds.size() + " - Paquetes: " + totalPaquetes);
         }
 
         System.out.println("📊 Total vuelos activos mostrados: " + vuelos.size());
@@ -382,6 +396,7 @@ public class OperacionesController {
             List<Map<String, Object>> outgoingFlights = obtenerProximosVuelosDesdeAlmacen(aero.getCodigo(), ahora);
             almacen.put("outgoingFlights", outgoingFlights);
 
+
             // ✅ NUEVO: Obtener los 3 primeros pedidos próximos a salir desde este almacén
             List<Map<String, Object>> outgoingOrders = obtenerProximosPedidosDesdeAlmacen(aero.getCodigo(), ahora);
             almacen.put("outgoingOrders", outgoingOrders);
@@ -396,76 +411,96 @@ public class OperacionesController {
     private List<Map<String, Object>> obtenerProximosVuelosDesdeAlmacen(String codigoAlmacen, LocalDateTime ahora) {
         List<Map<String, Object>> vuelos = new ArrayList<>();
 
-        // Buscar pedidos ASIGNADOS o EN_ALMACEN_INTERMEDIO que saldrán desde este almacén
-        String fechaStr = ahora.toLocalDate().toString();
-        String fechaMananaStr = ahora.plusDays(1).toLocalDate().toString();
-        String horaActualStr = ahora.toLocalTime().toString().substring(0, 5);
-
-        // Query para encontrar pedidos con próximos vuelos desde este almacén
-        List<Pedido> pedidosConVuelos = pedidoRepository.findActivosConVuelosProximos(
-                fechaStr,
-                fechaMananaStr,
-                horaActualStr,
-                "23:59", // Buscar hasta final del día siguiente
-                ahora.minusDays(1).toLocalDate().toString()
+        // Buscar TODOS los pedidos activos (sin filtro de fecha restrictivo)
+        List<Pedido> pedidosActivos = pedidoRepository.findByEstadoIn(
+                List.of(EstadoPedido.ASIGNADO,
+                        EstadoPedido.EN_TRANSITO,
+                        EstadoPedido.EN_ALMACEN_INTERMEDIO)
         );
 
-        if (pedidosConVuelos.isEmpty()) return vuelos;
 
-        // Cargar rutas
-        List<Long> pedidoIds = pedidosConVuelos.stream().map(Pedido::getId).toList();
+
+        if (pedidosActivos.isEmpty()) return vuelos;
+
+        // Cargar todas las rutas
+        List<Long> pedidoIds = pedidosActivos.stream().map(Pedido::getId).toList();
         List<RutaAsignada> todasLasRutas = rutaAsignadaRepository.findByPedidoIdIn(pedidoIds);
-
-        // ✅ FIX: Usar groupingBy en lugar de toMap para manejar múltiples rutas por pedido
         Map<Long, List<RutaAsignada>> rutasPorPedido = todasLasRutas.stream()
                 .collect(Collectors.groupingBy(RutaAsignada::getPedidoId));
 
-        // ✅ NUEVO: Agrupar pedidos Y rutas por vuelo
+        // Agrupar por vuelo
         Map<String, List<Pedido>> pedidosPorVuelo = new HashMap<>();
-        Map<String, List<RutaAsignada>> rutasPorVuelo = new HashMap<>(); // ✅ NUEVO
+        Map<String, List<RutaAsignada>> rutasPorVuelo = new HashMap<>();
         Map<String, RutaTramo> tramoPorVuelo = new HashMap<>();
         Map<String, LocalDateTime> horaSalidaPorVuelo = new HashMap<>();
 
-        for (Pedido pedido : pedidosConVuelos) {
+        for (Pedido pedido : pedidosActivos) {
             List<RutaAsignada> rutasDelPedido = rutasPorPedido.get(pedido.getId());
             if (rutasDelPedido == null || rutasDelPedido.isEmpty()) continue;
 
-            // Usar la primera ruta para determinar el tramo
             RutaAsignada ruta = rutasDelPedido.get(0);
 
-            // Determinar el tramo correcto según el estado del pedido
-            Integer tramoIndex = null;
-            if (pedido.getEstado() == EstadoPedido.ASIGNADO) {
-                tramoIndex = 0; // Primer vuelo
-            } else if (pedido.getEstado() == EstadoPedido.EN_ALMACEN_INTERMEDIO) {
-                tramoIndex = pedido.getTramoActual(); // Siguiente vuelo
+
+            // ✅ CAMBIO CLAVE: Iterar por TODOS los tramos, no solo el actual
+            for (int i = 0; i < ruta.getTramos().size(); i++) {
+                RutaTramo tramo = ruta.getTramos().get(i);
+
+                // Solo considerar tramos que salen de este almacén
+                if (!tramo.getOrigen().equals(codigoAlmacen)) {
+                    continue;
+                }
+
+
+                LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
+
+                // Solo vuelos futuros
+
+
+                // ✅ LÓGICA CORREGIDA
+                boolean puedeTomarVuelo = false;
+                String razon = "";
+
+                if (pedido.getEstado() == EstadoPedido.ASIGNADO && i == 0) {
+                    // Pedido aún no ha salido, solo mostrar en su almacén de origen
+                    puedeTomarVuelo = true;
+                    razon = "Pedido ASIGNADO en almacén de origen";
+
+                } else if (pedido.getEstado() == EstadoPedido.EN_ALMACEN_INTERMEDIO && i == pedido.getTramoActual()) {
+                    // Pedido YA ESTÁ en este almacén esperando
+                    puedeTomarVuelo = true;
+                    razon = "Pedido EN_ALMACEN_INTERMEDIO esperando en " + codigoAlmacen;
+
+                } else if (pedido.getEstado() == EstadoPedido.EN_TRANSITO && i == pedido.getTramoActual() + 1) {
+                    // Verificar si está llegando a este almacén
+                    RutaTramo tramoActual = ruta.getTramos().get(pedido.getTramoActual());
+                    if (tramoActual.getDestino().equals(codigoAlmacen)) {
+                        puedeTomarVuelo = true;
+                        razon = "Pedido EN_TRANSITO llegará a " + codigoAlmacen;
+                    } else {
+                        razon = "Pedido EN_TRANSITO pero no aterriza en " + codigoAlmacen +
+                                " (va a " + tramoActual.getDestino() + ")";
+                    }
+                } else {
+                    razon = "Estado=" + pedido.getEstado() + ", tramoActual=" + pedido.getTramoActual() +
+                            ", buscando tramo " + i;
+                }
+
+
+                if (!puedeTomarVuelo) {
+                    continue;
+                }
+
+                String vueloKey = tramo.getOrigen() + "-" + tramo.getDestino() + "-" +
+                        tramo.getFecha() + "-" + tramo.getHoraSalida();
+
+                pedidosPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).add(pedido);
+                rutasPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).addAll(rutasDelPedido);
+                tramoPorVuelo.putIfAbsent(vueloKey, tramo);
+                horaSalidaPorVuelo.putIfAbsent(vueloKey, horaSalida);
             }
-
-            if (tramoIndex == null || tramoIndex >= ruta.getTramos().size()) continue;
-
-            RutaTramo tramo = ruta.getTramos().get(tramoIndex);
-
-            // Filtrar solo vuelos que salen desde este almacén
-            if (!tramo.getOrigen().equals(codigoAlmacen)) continue;
-
-            LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
-
-            // Solo vuelos futuros
-            if (horaSalida.isBefore(ahora)) continue;
-
-            String vueloKey = tramo.getOrigen() + "-" + tramo.getDestino() + "-" +
-                    tramo.getFecha() + "-" + tramo.getHoraSalida();
-
-            pedidosPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).add(pedido);
-
-            // Agregar TODAS las rutas de este pedido
-            rutasPorVuelo.computeIfAbsent(vueloKey, k -> new ArrayList<>()).addAll(rutasDelPedido);
-
-            tramoPorVuelo.putIfAbsent(vueloKey, tramo);
-            horaSalidaPorVuelo.putIfAbsent(vueloKey, horaSalida);
         }
 
-        // Ordenar vuelos por hora de salida y tomar los 3 primeros
+        // Ordenar y tomar los 3 primeros
         List<Map.Entry<String, LocalDateTime>> vuelosOrdenados = new ArrayList<>(horaSalidaPorVuelo.entrySet());
         vuelosOrdenados.sort(Map.Entry.comparingByValue());
 
@@ -476,18 +511,16 @@ public class OperacionesController {
             String vueloKey = entry.getKey();
             RutaTramo tramo = tramoPorVuelo.get(vueloKey);
             List<Pedido> pedidosDelVuelo = pedidosPorVuelo.get(vueloKey);
-            List<RutaAsignada> rutasDelVuelo = rutasPorVuelo.get(vueloKey); // ✅ NUEVO
+            List<RutaAsignada> rutasDelVuelo = rutasPorVuelo.get(vueloKey);
             LocalDateTime horaSalida = entry.getValue();
 
             AeropuertoEntity destino = aeropuertoRepository.findByCodigo(tramo.getDestino()).orElse(null);
             if (destino == null) continue;
 
-            // ✅ CAMBIO: Usar cantidad de RutaAsignada en lugar de Pedido
             int totalPaquetes = rutasDelVuelo.stream()
                     .mapToInt(RutaAsignada::getCantidad)
                     .sum();
 
-            // Calcular hora de llegada
             LocalDateTime horaLlegada = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraLlegada()));
             if (horaLlegada.isBefore(horaSalida)) {
                 horaLlegada = horaLlegada.plusDays(1);
@@ -500,92 +533,110 @@ public class OperacionesController {
             vuelo.put("departureTime", horaSalida.toString());
             vuelo.put("arrivalTime", horaLlegada.toString());
 
-            // ✅ Obtener capacidad real desde tabla de vuelos
             int capacidadVuelo = obtenerCapacidadVuelo(tramo.getOrigen(), tramo.getDestino(), horaSalida);
             vuelo.put("capacity", capacidadVuelo);
 
-            // 🎯 CAP: Si excede capacidad, mostrar máximo la capacidad (para que muestre 100% máx)
             int paquetesMostrados = Math.min(totalPaquetes, capacidadVuelo);
             vuelo.put("packages", paquetesMostrados);
-
             vuelo.put("status", "scheduled");
-            vuelo.put("occupancyPercentage", Math.min(100.0, (totalPaquetes * 100.0) / capacidadVuelo)); // ✅ Cap a 100%
+            vuelo.put("occupancyPercentage", Math.min(100.0, (totalPaquetes * 100.0) / capacidadVuelo));
 
             vuelos.add(vuelo);
             count++;
         }
-
         return vuelos;
     }
 
     /**
      * ✅ NUEVO: Obtiene los 3 primeros pedidos próximos a salir desde un almacén
      */
+    /**
+     * ✅ CORREGIDO: Obtiene los 3 primeros pedidos próximos a salir desde un almacén
+     */
+    /**
+     * ✅ DEPURACIÓN: Obtiene los 3 primeros pedidos próximos a salir desde un almacén
+     */
     private List<Map<String, Object>> obtenerProximosPedidosDesdeAlmacen(String codigoAlmacen, LocalDateTime ahora) {
+        // ✅ FIX: Defensive copy para evitar problemas de referencia
+        final String almacenBuscado = String.valueOf(codigoAlmacen);
+
         List<Map<String, Object>> pedidosProximos = new ArrayList<>();
 
-        // Buscar pedidos ASIGNADOS o EN_ALMACEN_INTERMEDIO que están en este almacén
-        String fechaStr = ahora.toLocalDate().toString();
-        String fechaMananaStr = ahora.plusDays(1).toLocalDate().toString();
-        String horaActualStr = ahora.toLocalTime().toString().substring(0, 5);
-
-        // Obtener pedidos activos
-        List<Pedido> pedidosActivos = pedidoRepository.findActivosConVuelosProximos(
-                fechaStr,
-                fechaMananaStr,
-                horaActualStr,
-                "23:59",
-                ahora.minusDays(1).toLocalDate().toString()
+        List<Pedido> pedidosActivos = pedidoRepository.findByEstadoIn(
+                List.of(EstadoPedido.ASIGNADO,
+                        EstadoPedido.EN_TRANSITO,
+                        EstadoPedido.EN_ALMACEN_INTERMEDIO)
         );
 
         if (pedidosActivos.isEmpty()) return pedidosProximos;
 
-        // Cargar rutas
         List<Long> pedidoIds = pedidosActivos.stream().map(Pedido::getId).toList();
         List<RutaAsignada> todasLasRutas = rutaAsignadaRepository.findByPedidoIdIn(pedidoIds);
 
-        // ✅ FIX: Usar groupingBy en lugar de toMap para manejar múltiples rutas por pedido
+        if (todasLasRutas.isEmpty()) return pedidosProximos;
+
         Map<Long, List<RutaAsignada>> rutasPorPedido = todasLasRutas.stream()
                 .collect(Collectors.groupingBy(RutaAsignada::getPedidoId));
 
-        // Lista de pedidos candidatos con su hora de salida
         List<Map.Entry<Pedido, LocalDateTime>> pedidosConHora = new ArrayList<>();
 
         for (Pedido pedido : pedidosActivos) {
-            // Solo pedidos ASIGNADOS o EN_ALMACEN_INTERMEDIO
-            if (pedido.getEstado() != EstadoPedido.ASIGNADO &&
-                    pedido.getEstado() != EstadoPedido.EN_ALMACEN_INTERMEDIO) {
-                continue;
-            }
-
             List<RutaAsignada> rutasDelPedido = rutasPorPedido.get(pedido.getId());
             if (rutasDelPedido == null || rutasDelPedido.isEmpty()) continue;
 
-            // Usar la primera ruta
             RutaAsignada ruta = rutasDelPedido.get(0);
 
-            // Determinar el tramo actual
-            Integer tramoIndex = null;
-            if (pedido.getEstado() == EstadoPedido.ASIGNADO) {
-                tramoIndex = 0; // Primer vuelo
-            } else if (pedido.getEstado() == EstadoPedido.EN_ALMACEN_INTERMEDIO) {
-                tramoIndex = pedido.getTramoActual(); // Siguiente vuelo
+            for (int i = 0; i < ruta.getTramos().size(); i++) {
+                RutaTramo tramo = ruta.getTramos().get(i);
+
+                // ✅ Usar almacenBuscado en lugar de codigoAlmacen
+                if (!tramo.getOrigen().equals(almacenBuscado)) {
+                    continue;
+                }
+
+                LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
+
+                if (horaSalida.isBefore(ahora)) {
+                    continue;
+                }
+
+                // ✅ LÓGICA CORREGIDA para pedidos ASIGNADOS con múltiples tramos
+                boolean puedeTomarVuelo = false;
+
+                if (pedido.getEstado() == EstadoPedido.ASIGNADO) {
+                    if (i == 0) {
+                        // Primer vuelo - sale del origen
+                        puedeTomarVuelo = true;
+                    } else {
+                        // Vuelo de conexión - verificar que el tramo anterior llegue a este almacén
+                        RutaTramo tramoAnterior = ruta.getTramos().get(i - 1);
+                        if (tramoAnterior.getDestino().equals(almacenBuscado)) {
+                            puedeTomarVuelo = true;
+                        }
+                    }
+
+                } else if (pedido.getEstado() == EstadoPedido.EN_ALMACEN_INTERMEDIO) {
+                    if (i == pedido.getTramoActual()) {
+                        puedeTomarVuelo = true;
+                    }
+
+                } else if (pedido.getEstado() == EstadoPedido.EN_TRANSITO) {
+                    if (i == pedido.getTramoActual() + 1) {
+                        RutaTramo tramoActual = ruta.getTramos().get(pedido.getTramoActual());
+                        if (tramoActual.getDestino().equals(almacenBuscado)) {
+                            puedeTomarVuelo = true;
+                        }
+                    }
+                }
+
+                if (!puedeTomarVuelo) continue;
+
+                pedidosConHora.add(Map.entry(pedido, horaSalida));
+                break; // Solo agregar el pedido una vez
             }
-
-            if (tramoIndex == null || tramoIndex >= ruta.getTramos().size()) continue;
-
-            RutaTramo tramo = ruta.getTramos().get(tramoIndex);
-
-            // Filtrar solo pedidos que salen desde este almacén
-            if (!tramo.getOrigen().equals(codigoAlmacen)) continue;
-
-            LocalDateTime horaSalida = LocalDateTime.of(tramo.getFecha(), LocalTime.parse(tramo.getHoraSalida()));
-
-            // Solo vuelos futuros
-            if (horaSalida.isBefore(ahora)) continue;
-
-            pedidosConHora.add(Map.entry(pedido, horaSalida));
         }
+
+        if (pedidosConHora.isEmpty()) return pedidosProximos;
 
         // Ordenar por hora de salida y tomar los 3 primeros
         pedidosConHora.sort(Map.Entry.comparingByValue());
@@ -599,16 +650,28 @@ public class OperacionesController {
 
             List<RutaAsignada> rutasDelPedido = rutasPorPedido.get(pedido.getId());
             RutaAsignada ruta = rutasDelPedido.get(0);
-            Integer tramoIndex = (pedido.getEstado() == EstadoPedido.ASIGNADO) ? 0 : pedido.getTramoActual();
-            RutaTramo tramo = ruta.getTramos().get(tramoIndex);
+
+            // Encontrar el tramo correcto que sale de este almacén
+            RutaTramo tramoSalida = null;
+            for (RutaTramo t : ruta.getTramos()) {
+                if (t.getOrigen().equals(almacenBuscado)) {
+                    LocalDateTime horaTramo = LocalDateTime.of(t.getFecha(), LocalTime.parse(t.getHoraSalida()));
+                    if (horaTramo.equals(horaSalida)) {
+                        tramoSalida = t;
+                        break;
+                    }
+                }
+            }
+
+            if (tramoSalida == null) continue;
 
             Map<String, Object> pedidoMap = new HashMap<>();
             pedidoMap.put("orderId", String.valueOf(pedido.getId()));
             pedidoMap.put("destination", pedido.getAeropuertoDestino());
-            pedidoMap.put("flightCode", tramo.getOrigen() + "-" + tramo.getDestino());
+            pedidoMap.put("flightCode", tramoSalida.getOrigen() + "-" + tramoSalida.getDestino());
             pedidoMap.put("departureTime", horaSalida.toString());
-            pedidoMap.put("weight", pedido.getCantidad());
-            pedidoMap.put("registeredTime", pedido.getFechaPedido().toString());
+            pedidoMap.put("weight", ruta.getCantidad());
+            pedidoMap.put("registeredTime", pedido.getFechaPedido() != null ? pedido.getFechaPedido().toString() : "");
 
             pedidosProximos.add(pedidoMap);
             count++;
