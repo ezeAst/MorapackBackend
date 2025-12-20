@@ -919,4 +919,103 @@ public class OperacionesController {
 
         return ResponseEntity.ok(response);
     }
+
+    /**
+     * GET /api/operaciones/reporte-cierre
+     * Genera un reporte CSV con todos los pedidos y sus rutas asignadas
+     * Se usa al detener las operaciones para tener un registro completo
+     */
+    @GetMapping("/reporte-cierre")
+    public ResponseEntity<String> generarReporteCierre() {
+        try {
+            StringBuilder csv = new StringBuilder();
+
+            // Encabezados del CSV
+            csv.append("PEDIDO_ID,CLIENTE_ID,DESTINO,CANTIDAD,ESTADO,TRAMO_ACTUAL,FECHA_PEDIDO,HORA_ENTREGA,");
+            csv.append("RUTA_ID,TRAMO_ORDEN,ORIGEN,DESTINO_TRAMO,FECHA_VUELO,HORA_SALIDA,HORA_LLEGADA\n");
+
+            // Obtener todos los pedidos
+            List<Pedido> todosPedidos = pedidoRepository.findAllWithLimit();
+
+            for (Pedido pedido : todosPedidos) {
+                // Información básica del pedido
+                String pedidoInfo = String.format("%d,%s,%s,%d,%s,%s,%s,%s",
+                        pedido.getId(),
+                        escapeCsv(pedido.getIdCliente()),
+                        escapeCsv(pedido.getAeropuertoDestino()),
+                        pedido.getCantidad(),
+                        pedido.getEstado().toString(),
+                        pedido.getTramoActual() != null ? pedido.getTramoActual().toString() : "",
+                        formatFechaPedido(pedido),
+                        pedido.getHoraEntrega() != null ? pedido.getHoraEntrega().toString() : ""
+                );
+
+                // Buscar rutas asignadas a este pedido
+                List<RutaAsignada> rutas = rutaAsignadaRepository.findByPedidoIdIn(List.of(pedido.getId()));
+
+                if (rutas.isEmpty()) {
+                    // Pedido sin ruta asignada
+                    csv.append(pedidoInfo).append(",,,,,,,\n");
+                } else {
+                    // Pedido con rutas - una línea por cada tramo
+                    for (RutaAsignada ruta : rutas) {
+                        if (ruta.getTramos().isEmpty()) {
+                            csv.append(pedidoInfo).append(",").append(ruta.getId()).append(",,,,,,\n");
+                        } else {
+                            for (RutaTramo tramo : ruta.getTramos()) {
+                                csv.append(pedidoInfo).append(",");
+                                csv.append(String.format("%d,%d,%s,%s,%s,%s,%s\n",
+                                        ruta.getId(),
+                                        tramo.getOrden(),
+                                        escapeCsv(tramo.getOrigen()),
+                                        escapeCsv(tramo.getDestino()),
+                                        tramo.getFecha() != null ? tramo.getFecha().toString() : "",
+                                        escapeCsv(tramo.getHoraSalida()),
+                                        escapeCsv(tramo.getHoraLlegada())
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Configurar headers para descarga de archivo
+            return ResponseEntity.ok()
+                    .header("Content-Type", "text/csv; charset=utf-8")
+                    .header("Content-Disposition", "attachment; filename=reporte_cierre_operaciones.csv")
+                    .body(csv.toString());
+
+        } catch (Exception e) {
+            System.err.println("Error generando reporte de cierre: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(500).body("Error al generar reporte: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Escapa valores CSV para evitar problemas con comas y comillas
+     */
+    private String escapeCsv(String value) {
+        if (value == null) return "";
+        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
+    }
+
+    /**
+     * Formatea la fecha del pedido desde los campos separados
+     */
+    private String formatFechaPedido(Pedido pedido) {
+        if (pedido.getAnho() > 0 && pedido.getMes() > 0 && pedido.getDia() > 0) {
+            return String.format("%04d-%02d-%02d %02d:%02d",
+                    pedido.getAnho(),
+                    pedido.getMes(),
+                    pedido.getDia(),
+                    pedido.getHora(),
+                    pedido.getMinuto()
+            );
+        }
+        return "";
+    }
 }

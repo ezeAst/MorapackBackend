@@ -23,6 +23,7 @@ public class GRASP {
     private int batchSize = 3000;                    // Fallback: cantidad de pedidos
     private long batchIntervalMinutes = 30;          // NUEVO: Intervalo de tiempo simulado (minutos)
     private boolean usarBatchPorTiempo = true;       // NUEVO: Flag para activar batch por tiempo
+    private Random random;
 
     // === Métricas del algoritmo ===
     private List<Long> tiemposArribo = new ArrayList<>();        // TA: Intervalos entre pedidos (minutos)
@@ -40,6 +41,7 @@ public class GRASP {
         this.tamanoRCL = 3;         // Valor por defecto
         this.vuelosPorOrigen = new HashMap<>();
         this.estadoSistema = new EstadoSistema();
+        this.random = new Random();
     }
 
     public GRASP(List<Pedido> pedidos, List<Vuelo> vuelos,
@@ -54,6 +56,7 @@ public class GRASP {
         inicializarIndiceVuelos();
         this.cacheRutasGlobal = new HashMap<>();
         this.estadoSistema = new EstadoSistema();
+        this.random = new Random();
     }
 
     // === Getters y Setters ===
@@ -748,29 +751,29 @@ public class GRASP {
         List<Ruta> rutasCreadas = new ArrayList<>();
         int cantidadPendiente = pedido.getCantidad() - pedido.getCantidadCumplida();
 
-        // Copiar la lista (que ya viene ordenada: índice 0 es la mejor)
+        // Copiar la lista RCL
         List<OpcionSede> rclDisponible = new ArrayList<>(rcl);
 
         // Intentar asignar hasta completar el pedido o agotar opciones
         while (cantidadPendiente > 0 && !rclDisponible.isEmpty()) {
 
-            // SIEMPRE ELEGIMOS LA PRIMERA (LA MEJOR)
-            OpcionSede opcion = rclDisponible.get(0);
+            // ✅ SELECCIÓN ALEATORIA de la RCL (comportamiento GRASP)
+            int indiceAleatorio = random.nextInt(rclDisponible.size());
+            OpcionSede opcion = rclDisponible.get(indiceAleatorio);
 
-            // ✅ NO REMOVER AÚN - Primero verificar si tiene capacidad
-
+            // Validar capacidad de VUELOS
             int capacidadDisponibleVuelos = Integer.MAX_VALUE;
             for (Vuelo vuelo : opcion.ruta) {
-                // ✅ NUEVO: Generar clave del vuelo para consultar EstadoSistema
+                // Generar clave del vuelo para consultar EstadoSistema
                 String claveVuelo = generarClaveVuelo(vuelo);
 
-                // ✅ NUEVO: Obtener ocupación de pedidos ASIGNADOS previos desde BD
+                // Obtener ocupación de pedidos ASIGNADOS previos desde BD
                 int ocupacionPrevia = 0;
                 if (estadoSistema != null) {
                     ocupacionPrevia = estadoSistema.getCapacidadOcupada(claveVuelo);
                 }
 
-                // ✅ CALCULAR CAPACIDAD REAL DISPONIBLE
+                // CALCULAR CAPACIDAD REAL DISPONIBLE
                 // = Capacidad Total - Ocupación Local (memoria) - Ocupación Previa (BD)
                 int capacidadDisponible = vuelo.getCapacidadMaxima()
                         - vuelo.getCapacidadActual()  // Ocupación local
@@ -778,7 +781,7 @@ public class GRASP {
 
                 capacidadDisponibleVuelos = Math.min(capacidadDisponibleVuelos, capacidadDisponible);
 
-                // ✅ DEBUG (opcional): Mostrar validación
+                // DEBUG (opcional): Mostrar validación
                 System.out.println(String.format(
                         "🔍 Vuelo %s: Cap=%d | Actual=%d | BD=%d | Disp=%d",
                         claveVuelo,
@@ -790,7 +793,7 @@ public class GRASP {
             }
 
             if (capacidadDisponibleVuelos <= 0) {
-                rclDisponible.remove(0); // ✅ Remover AHORA porque no tiene capacidad
+                rclDisponible.remove(indiceAleatorio); // Remover porque no tiene capacidad
                 continue;
             }
 
@@ -798,7 +801,7 @@ public class GRASP {
             int capacidadDisponibleAlmacenes = validarCapacidadAlmacenesEnRuta(opcion.ruta);
 
             if (capacidadDisponibleAlmacenes <= 0) {
-                rclDisponible.remove(0); // ✅ Remover AHORA porque no tiene capacidad
+                rclDisponible.remove(indiceAleatorio); // Remover porque no tiene capacidad
                 continue;
             }
 
@@ -830,8 +833,8 @@ public class GRASP {
             rutasCreadas.add(nuevaRuta);
             cantidadPendiente -= cantidadAsignada;
 
-            // ✅ NO REMOVER AÚN - Dejar que se reuse en la siguiente iteración
-            // La ruta solo se removerá cuando ya no tenga capacidad (arriba)
+            // ✅ REMOVER la opción usada de la RCL (evitar reutilización)
+            rclDisponible.remove(indiceAleatorio);
         }
 
         // Si aún quedan productos sin asignar
